@@ -1,0 +1,437 @@
+// ============================================================
+//  VISION R+ — Prisma Schema
+//  Base de données : PostgreSQL
+//  Systèmes comptables : OHADA + PCG France
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")       // Transaction pooler Supabase (port 6543)
+  directUrl = env("DIRECT_URL")         // Connexion directe pour prisma migrate
+}
+
+// ─────────────────────────────────────────
+//  ENUMS
+// ─────────────────────────────────────────
+
+enum AccountingSystem {
+  ohada
+  pcg_france
+}
+
+enum AccountType {
+  actif
+  passif
+  charge
+  produit
+  tresorerie
+  analytique
+}
+
+enum JournalType {
+  achats
+  ventes
+  banque
+  caisse
+  od
+  salaires
+  actif
+}
+
+enum EntryStatus {
+  brouillon
+  validee
+  annulee
+}
+
+enum MemberRole {
+  admin
+  comptable
+  lecture
+}
+
+enum Plan {
+  free
+  pro
+  cabinet
+}
+
+enum SubscriptionStatus {
+  actif
+  annule
+  expire
+  essai
+}
+
+enum Currency {
+  EUR
+  XAF
+  XOF
+  USD
+  GBP
+  MAD
+  TND
+}
+
+enum AlertType {
+  tresorerie_negative
+  charge_inhabituelle
+  resultat_negatif
+  echeance_fiscale
+  objectif_atteint
+}
+
+// ─────────────────────────────────────────
+//  USER
+// ─────────────────────────────────────────
+
+model User {
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  password_hash      String
+  first_name         String
+  last_name          String
+  phone              String?
+  avatar_url         String?
+  plan               Plan      @default(free)
+  is_verified        Boolean   @default(false)
+  is_active          Boolean   @default(true)
+  preferred_language String    @default("fr")
+  last_login_at      DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  // Relations
+  owned_companies    Company[]        @relation("CompanyOwner")
+  memberships        CompanyMember[]
+  subscriptions      Subscription[]
+  journal_entries    JournalEntry[]   @relation("EntryCreator")
+  validated_entries  JournalEntry[]   @relation("EntryValidator")
+  ai_conversations   AiConversation[]
+  audit_logs         AuditLog[]
+  budgets_created    Budget[]
+  invited_members    CompanyMember[]  @relation("MemberInviter")
+  closed_years       FiscalYear[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+//  SUBSCRIPTION
+// ─────────────────────────────────────────
+
+model Subscription {
+  id                    String             @id @default(uuid())
+  user_id               String
+  plan                  Plan
+  status                SubscriptionStatus @default(essai)
+  stripe_customer_id    String?
+  stripe_sub_id         String?
+  current_period_start  DateTime?
+  current_period_end    DateTime?
+  trial_ends_at         DateTime?
+  cancelled_at          DateTime?
+  created_at            DateTime           @default(now())
+  updated_at            DateTime           @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────
+//  COMPANY
+// ─────────────────────────────────────────
+
+model Company {
+  id                 String            @id @default(uuid())
+  owner_id           String
+  name               String
+  legal_form         String?
+  siret              String?
+  rccm               String?
+  nif                String?
+  tax_id             String?
+  accounting_system  AccountingSystem
+  currency           Currency          @default(EUR)
+  country            String            @default("France")
+  address            String?
+  city               String?
+  postal_code        String?
+  phone              String?
+  email              String?
+  website            String?
+  fiscal_year_start  DateTime
+  fiscal_year_end    DateTime
+  is_active          Boolean           @default(true)
+  logo_url           String?
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @updatedAt
+
+  // Relations
+  owner            User              @relation("CompanyOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  members          CompanyMember[]
+  accounts         Account[]
+  fiscal_years     FiscalYear[]
+  journal_entries  JournalEntry[]
+  journal_lines    JournalLine[]
+  third_parties    ThirdParty[]
+  budgets          Budget[]
+  alerts           FinancialAlert[]
+  ai_conversations AiConversation[]
+  audit_logs       AuditLog[]
+
+  @@map("companies")
+}
+
+// ─────────────────────────────────────────
+//  COMPANY MEMBER
+// ─────────────────────────────────────────
+
+model CompanyMember {
+  id          String     @id @default(uuid())
+  company_id  String
+  user_id     String
+  role        MemberRole @default(lecture)
+  invited_by  String?
+  accepted_at DateTime?
+  created_at  DateTime   @default(now())
+
+  company  Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user     User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  inviter  User?   @relation("MemberInviter", fields: [invited_by], references: [id])
+
+  @@unique([company_id, user_id])
+  @@map("company_members")
+}
+
+// ─────────────────────────────────────────
+//  ACCOUNT (Plan comptable)
+// ─────────────────────────────────────────
+
+model Account {
+  id          String           @id @default(uuid())
+  company_id  String?          // NULL = compte système partagé
+  code        String
+  label       String
+  type        AccountType
+  system      AccountingSystem
+  parent_code String?
+  is_detail   Boolean          @default(true)
+  is_active   Boolean          @default(true)
+  created_at  DateTime         @default(now())
+
+  company       Company?      @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  journal_lines JournalLine[]
+  third_parties ThirdParty[]
+  budgets       Budget[]
+
+  @@unique([company_id, code, system])
+  @@map("accounts")
+}
+
+// ─────────────────────────────────────────
+//  FISCAL YEAR
+// ─────────────────────────────────────────
+
+model FiscalYear {
+  id          String    @id @default(uuid())
+  company_id  String
+  label       String
+  start_date  DateTime
+  end_date    DateTime
+  is_closed   Boolean   @default(false)
+  closed_at   DateTime?
+  closed_by   String?
+  created_at  DateTime  @default(now())
+
+  company         Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  closer          User?          @relation(fields: [closed_by], references: [id])
+  journal_entries JournalEntry[]
+  budgets         Budget[]
+
+  @@unique([company_id, start_date, end_date])
+  @@map("fiscal_years")
+}
+
+// ─────────────────────────────────────────
+//  JOURNAL ENTRY (En-tête écriture)
+// ─────────────────────────────────────────
+
+model JournalEntry {
+  id              String      @id @default(uuid())
+  company_id      String
+  fiscal_year_id  String
+  journal_type    JournalType
+  entry_date      DateTime
+  reference       String?
+  libelle         String
+  status          EntryStatus @default(brouillon)
+  total_debit     Decimal     @default(0) @db.Decimal(18, 2)
+  total_credit    Decimal     @default(0) @db.Decimal(18, 2)
+  attachment_url  String?
+  created_by      String
+  validated_by    String?
+  validated_at    DateTime?
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+
+  company     Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  fiscal_year FiscalYear     @relation(fields: [fiscal_year_id], references: [id])
+  creator     User           @relation("EntryCreator", fields: [created_by], references: [id])
+  validator   User?          @relation("EntryValidator", fields: [validated_by], references: [id])
+  lines       JournalLine[]
+
+  @@map("journal_entries")
+}
+
+// ─────────────────────────────────────────
+//  JOURNAL LINE (Lignes débit/crédit)
+// ─────────────────────────────────────────
+
+model JournalLine {
+  id          String   @id @default(uuid())
+  entry_id    String
+  company_id  String
+  account_id  String
+  libelle     String?
+  debit       Decimal  @default(0) @db.Decimal(18, 2)
+  credit      Decimal  @default(0) @db.Decimal(18, 2)
+  line_order  Int      @default(1)
+  created_at  DateTime @default(now())
+
+  entry   JournalEntry @relation(fields: [entry_id], references: [id], onDelete: Cascade)
+  company Company      @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [account_id], references: [id])
+
+  @@map("journal_lines")
+}
+
+// ─────────────────────────────────────────
+//  THIRD PARTY (Clients / Fournisseurs)
+// ─────────────────────────────────────────
+
+model ThirdParty {
+  id          String   @id @default(uuid())
+  company_id  String
+  type        String   // 'client' | 'fournisseur' | 'both'
+  name        String
+  siret       String?
+  tax_id      String?
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  country     String?
+  account_id  String?
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  company Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [account_id], references: [id])
+
+  @@map("third_parties")
+}
+
+// ─────────────────────────────────────────
+//  BUDGET
+// ─────────────────────────────────────────
+
+model Budget {
+  id              String   @id @default(uuid())
+  company_id      String
+  fiscal_year_id  String
+  account_id      String
+  month           Int
+  amount          Decimal  @default(0) @db.Decimal(18, 2)
+  note            String?
+  created_by      String
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  company     Company    @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  fiscal_year FiscalYear @relation(fields: [fiscal_year_id], references: [id])
+  account     Account    @relation(fields: [account_id], references: [id])
+  creator     User       @relation(fields: [created_by], references: [id])
+
+  @@unique([company_id, fiscal_year_id, account_id, month])
+  @@map("budgets")
+}
+
+// ─────────────────────────────────────────
+//  FINANCIAL ALERT
+// ─────────────────────────────────────────
+
+model FinancialAlert {
+  id           String    @id @default(uuid())
+  company_id   String
+  type         AlertType
+  message      String
+  is_read      Boolean   @default(false)
+  triggered_at DateTime  @default(now())
+  read_at      DateTime?
+
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@map("financial_alerts")
+}
+
+// ─────────────────────────────────────────
+//  AI CONVERSATION
+// ─────────────────────────────────────────
+
+model AiConversation {
+  id         String   @id @default(uuid())
+  user_id    String
+  company_id String?
+  title      String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user     User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company  Company?   @relation(fields: [company_id], references: [id], onDelete: SetNull)
+  messages AiMessage[]
+
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id              String   @id @default(uuid())
+  conversation_id String
+  role            String   // 'user' | 'assistant'
+  content         String
+  tokens_used     Int?
+  created_at      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@map("ai_messages")
+}
+
+// ─────────────────────────────────────────
+//  AUDIT LOG
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  user_id     String?
+  company_id  String?
+  action      String
+  table_name  String?
+  record_id   String?
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?
+  user_agent  String?
+  created_at  DateTime @default(now())
+
+  user    User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  company Company? @relation(fields: [company_id], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
