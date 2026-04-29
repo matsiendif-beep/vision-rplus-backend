@@ -50,4 +50,4 @@ COPY --from=builder /app/dist ./dist
 EXPOSE 3000
 
 # Migrations au démarrage puis lancement de l'app
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+CMD ["sh", "-c", "node dist/main"]
