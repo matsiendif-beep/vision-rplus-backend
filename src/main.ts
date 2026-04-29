@@ -23,10 +23,10 @@ async function bootstrap() {
     : frontendUrl;
 
   app.enableCors({
-    origin:      allowedOrigins,
-    credentials: true,
-  });
-
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
   // ── Validation globale ────────────────────────────────────
   app.useGlobalPipes(
     new ValidationPipe({
