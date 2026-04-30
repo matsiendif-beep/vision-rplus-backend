@@ -3,7 +3,7 @@
 #  Node 20 LTS · NestJS · Prisma · argon2 (natif)
 # =============================================================
 
-FROM node:20-slim AS builder
+FROM node:20-slim AS Builder ARG CACHEBUST=1
 WORKDIR /app
 
 # Outils de compilation pour les modules natifs (argon2)
