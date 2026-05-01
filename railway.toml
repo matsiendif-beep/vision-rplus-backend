@@ -1,6 +1,0 @@
-[build]
-builder = "nixpacks"
-buildCommand = "npm ci && npx nest build"
-
-[deploy]
-startCommand = "node dist/src/main"
