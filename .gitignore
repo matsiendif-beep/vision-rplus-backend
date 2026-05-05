@@ -28,3 +28,6 @@ Thumbs.db
 
 # Prisma (généré au build)
 node_modules/.prisma/
+
+# Local Claude Code settings (may contain secrets)
+.claude/settings.local.json

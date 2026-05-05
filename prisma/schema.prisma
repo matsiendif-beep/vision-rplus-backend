@@ -1,6 +1,6 @@
 // ============================================================
-//  VISION R+ — Prisma Schema
-//  Base de données : PostgreSQL
+//  VISION R+ — Prisma Schema  v2.0
+//  Base de données : PostgreSQL (Supabase)
 //  Systèmes comptables : OHADA + PCG France
 // ============================================================
 
@@ -10,12 +10,35 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")       // Transaction pooler Supabase (port 6543)
-  directUrl = env("DIRECT_URL")         // Connexion directe pour prisma migrate
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────────────────────────────────
-//  ENUMS
+//  ENUMS — AUTH & PLANS
+// ─────────────────────────────────────────
+
+enum Plan {
+  free
+  pro
+  cabinet
+}
+
+enum SubscriptionStatus {
+  actif
+  annule
+  expire
+  essai
+}
+
+enum MemberRole {
+  admin
+  comptable
+  lecture
+}
+
+// ─────────────────────────────────────────
+//  ENUMS — COMPTABILITÉ
 // ─────────────────────────────────────────
 
 enum AccountingSystem {
@@ -48,25 +71,6 @@ enum EntryStatus {
   annulee
 }
 
-enum MemberRole {
-  admin
-  comptable
-  lecture
-}
-
-enum Plan {
-  free
-  pro
-  cabinet
-}
-
-enum SubscriptionStatus {
-  actif
-  annule
-  expire
-  essai
-}
-
 enum Currency {
   EUR
   XAF
@@ -77,17 +81,118 @@ enum Currency {
   TND
 }
 
+// ─────────────────────────────────────────
+//  ENUMS — IMMOBILISATIONS
+// ─────────────────────────────────────────
+
+enum DepreciationMethod {
+  lineaire
+  degressive
+}
+
+enum AssetStatus {
+  en_service
+  cede
+  mis_au_rebut
+}
+
+// ─────────────────────────────────────────
+//  ENUMS — DOCUMENTS
+// ─────────────────────────────────────────
+
+enum DocumentType {
+  facture
+  recu
+  releve_bancaire
+  contrat
+  bon_commande
+  bulletin_salaire
+  autre
+}
+
+enum DocumentSource {
+  upload_web
+  scan_mobile
+  email
+  import
+}
+
+// ─────────────────────────────────────────
+//  ENUMS — FISCAL
+// ─────────────────────────────────────────
+
+enum TaxType {
+  tva_collectee
+  tva_deductible
+  is
+  dsf
+  patente
+  tfpb
+  autre
+}
+
+enum DeclarationStatus {
+  brouillon
+  calculee
+  validee
+  deposee
+}
+
+// ─────────────────────────────────────────
+//  ENUMS — ALERTES & ANALYSE
+// ─────────────────────────────────────────
+
 enum AlertType {
   tresorerie_negative
   charge_inhabituelle
   resultat_negatif
   echeance_fiscale
   objectif_atteint
+  bilan_desequilibre
 }
 
 // ─────────────────────────────────────────
-//  USER
+//  ENUMS — OFFLINE SYNC
 // ─────────────────────────────────────────
+
+enum SyncOperation {
+  create
+  update
+  delete
+}
+
+enum SyncStatus {
+  pending
+  synced
+  conflict
+  error
+}
+
+// ─────────────────────────────────────────
+//  ENUMS — EXPORTS
+// ─────────────────────────────────────────
+
+enum ExportFormat {
+  pdf
+  xlsx
+  csv
+}
+
+enum ExportType {
+  bilan
+  compte_resultat
+  grand_livre
+  balance
+  journal
+  dsf
+  tafire
+  immobilisations
+  flux_tresorerie
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AUTH & UTILISATEURS
+// ═══════════════════════════════════════════════════════════
 
 model User {
   id                 String    @id @default(uuid())
@@ -105,74 +210,71 @@ model User {
   created_at         DateTime  @default(now())
   updated_at         DateTime  @updatedAt
 
-  // Relations
-  owned_companies    Company[]        @relation("CompanyOwner")
-  memberships        CompanyMember[]
-  subscriptions      Subscription[]
-  journal_entries    JournalEntry[]   @relation("EntryCreator")
-  validated_entries  JournalEntry[]   @relation("EntryValidator")
-  ai_conversations   AiConversation[]
-  audit_logs         AuditLog[]
-  budgets_created    Budget[]
-  invited_members    CompanyMember[]  @relation("MemberInviter")
-  closed_years       FiscalYear[]
+  owned_companies   Company[]        @relation("CompanyOwner")
+  memberships       CompanyMember[]
+  subscriptions     Subscription[]
+  journal_entries   JournalEntry[]   @relation("EntryCreator")
+  validated_entries JournalEntry[]   @relation("EntryValidator")
+  ai_conversations  AiConversation[]
+  audit_logs        AuditLog[]
+  budgets_created   Budget[]
+  invited_members   CompanyMember[]  @relation("MemberInviter")
+  closed_years      FiscalYear[]
+  uploaded_docs     Document[]
+  export_logs       ExportLog[]
+  sync_queues       SyncQueue[]
 
   @@map("users")
 }
 
-// ─────────────────────────────────────────
-//  SUBSCRIPTION
-// ─────────────────────────────────────────
-
 model Subscription {
-  id                    String             @id @default(uuid())
-  user_id               String
-  plan                  Plan
-  status                SubscriptionStatus @default(essai)
-  stripe_customer_id    String?
-  stripe_sub_id         String?
-  current_period_start  DateTime?
-  current_period_end    DateTime?
-  trial_ends_at         DateTime?
-  cancelled_at          DateTime?
-  created_at            DateTime           @default(now())
-  updated_at            DateTime           @updatedAt
+  id                   String             @id @default(uuid())
+  user_id              String
+  plan                 Plan
+  status               SubscriptionStatus @default(essai)
+  stripe_customer_id   String?
+  stripe_sub_id        String?
+  current_period_start DateTime?
+  current_period_end   DateTime?
+  trial_ends_at        DateTime?
+  cancelled_at         DateTime?
+  created_at           DateTime           @default(now())
+  updated_at           DateTime           @updatedAt
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("subscriptions")
 }
 
-// ─────────────────────────────────────────
-//  COMPANY
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  ENTREPRISES & MEMBRES
+// ═══════════════════════════════════════════════════════════
 
 model Company {
-  id                 String            @id @default(uuid())
-  owner_id           String
-  name               String
-  legal_form         String?
-  siret              String?
-  rccm               String?
-  nif                String?
-  tax_id             String?
-  accounting_system  AccountingSystem
-  currency           Currency          @default(EUR)
-  country            String            @default("France")
-  address            String?
-  city               String?
-  postal_code        String?
-  phone              String?
-  email              String?
-  website            String?
-  fiscal_year_start  DateTime
-  fiscal_year_end    DateTime
-  is_active          Boolean           @default(true)
-  logo_url           String?
-  created_at         DateTime          @default(now())
-  updated_at         DateTime          @updatedAt
+  id                String           @id @default(uuid())
+  owner_id          String
+  name              String
+  legal_form        String?
+  siret             String?
+  rccm              String?
+  nif               String?
+  tax_id            String?
+  accounting_system AccountingSystem
+  currency          Currency         @default(EUR)
+  country           String           @default("France")
+  address           String?
+  city              String?
+  postal_code       String?
+  phone             String?
+  email             String?
+  website           String?
+  fiscal_year_start DateTime
+  fiscal_year_end   DateTime
+  is_active         Boolean          @default(true)
+  logo_url          String?
+  created_at        DateTime         @default(now())
+  updated_at        DateTime         @updatedAt
 
-  // Relations
   owner            User              @relation("CompanyOwner", fields: [owner_id], references: [id], onDelete: Cascade)
   members          CompanyMember[]
   accounts         Account[]
@@ -184,13 +286,15 @@ model Company {
   alerts           FinancialAlert[]
   ai_conversations AiConversation[]
   audit_logs       AuditLog[]
+  fixed_assets     FixedAsset[]
+  documents        Document[]
+  tax_declarations TaxDeclaration[]
+  bank_accounts    BankAccount[]
+  export_logs      ExportLog[]
+  sync_queues      SyncQueue[]
 
   @@map("companies")
 }
-
-// ─────────────────────────────────────────
-//  COMPANY MEMBER
-// ─────────────────────────────────────────
 
 model CompanyMember {
   id          String     @id @default(uuid())
@@ -201,21 +305,21 @@ model CompanyMember {
   accepted_at DateTime?
   created_at  DateTime   @default(now())
 
-  company  Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  user     User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  inviter  User?   @relation("MemberInviter", fields: [invited_by], references: [id])
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  inviter User?   @relation("MemberInviter", fields: [invited_by], references: [id])
 
   @@unique([company_id, user_id])
   @@map("company_members")
 }
 
-// ─────────────────────────────────────────
-//  ACCOUNT (Plan comptable)
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  PLAN COMPTABLE
+// ═══════════════════════════════════════════════════════════
 
 model Account {
   id          String           @id @default(uuid())
-  company_id  String?          // NULL = compte système partagé
+  company_id  String?
   code        String
   label       String
   type        AccountType
@@ -225,18 +329,21 @@ model Account {
   is_active   Boolean          @default(true)
   created_at  DateTime         @default(now())
 
-  company       Company?      @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  journal_lines JournalLine[]
-  third_parties ThirdParty[]
-  budgets       Budget[]
+  company                Company?          @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  journal_lines          JournalLine[]
+  third_parties          ThirdParty[]
+  budgets                Budget[]
+  fixed_assets           FixedAsset[]      @relation("AssetAccount")
+  depreciation_accounts  FixedAsset[]      @relation("DepreciationChargeAccount")
+  accumulated_accounts   FixedAsset[]      @relation("AccumulatedDepreciationAccount")
 
   @@unique([company_id, code, system])
   @@map("accounts")
 }
 
-// ─────────────────────────────────────────
-//  FISCAL YEAR
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  EXERCICES FISCAUX
+// ═══════════════════════════════════════════════════════════
 
 model FiscalYear {
   id          String    @id @default(uuid())
@@ -249,49 +356,49 @@ model FiscalYear {
   closed_by   String?
   created_at  DateTime  @default(now())
 
-  company         Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  closer          User?          @relation(fields: [closed_by], references: [id])
-  journal_entries JournalEntry[]
-  budgets         Budget[]
+  company             Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  closer              User?             @relation(fields: [closed_by], references: [id])
+  journal_entries     JournalEntry[]
+  budgets             Budget[]
+  depreciation_lines  DepreciationLine[]
+  tax_declarations    TaxDeclaration[]
+  export_logs         ExportLog[]
 
   @@unique([company_id, start_date, end_date])
   @@map("fiscal_years")
 }
 
-// ─────────────────────────────────────────
-//  JOURNAL ENTRY (En-tête écriture)
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  JOURNAL COMPTABLE
+// ═══════════════════════════════════════════════════════════
 
 model JournalEntry {
-  id              String      @id @default(uuid())
-  company_id      String
-  fiscal_year_id  String
-  journal_type    JournalType
-  entry_date      DateTime
-  reference       String?
-  libelle         String
-  status          EntryStatus @default(brouillon)
-  total_debit     Decimal     @default(0) @db.Decimal(18, 2)
-  total_credit    Decimal     @default(0) @db.Decimal(18, 2)
-  attachment_url  String?
-  created_by      String
-  validated_by    String?
-  validated_at    DateTime?
-  created_at      DateTime    @default(now())
-  updated_at      DateTime    @updatedAt
+  id             String      @id @default(uuid())
+  company_id     String
+  fiscal_year_id String
+  journal_type   JournalType
+  entry_date     DateTime
+  reference      String?
+  libelle        String
+  status         EntryStatus @default(brouillon)
+  total_debit    Decimal     @default(0) @db.Decimal(18, 2)
+  total_credit   Decimal     @default(0) @db.Decimal(18, 2)
+  attachment_url String?
+  created_by     String
+  validated_by   String?
+  validated_at   DateTime?
+  created_at     DateTime    @default(now())
+  updated_at     DateTime    @updatedAt
 
-  company     Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  fiscal_year FiscalYear     @relation(fields: [fiscal_year_id], references: [id])
-  creator     User           @relation("EntryCreator", fields: [created_by], references: [id])
-  validator   User?          @relation("EntryValidator", fields: [validated_by], references: [id])
+  company     Company       @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  fiscal_year FiscalYear    @relation(fields: [fiscal_year_id], references: [id])
+  creator     User          @relation("EntryCreator", fields: [created_by], references: [id])
+  validator   User?         @relation("EntryValidator", fields: [validated_by], references: [id])
   lines       JournalLine[]
+  documents   Document[]
 
   @@map("journal_entries")
 }
-
-// ─────────────────────────────────────────
-//  JOURNAL LINE (Lignes débit/crédit)
-// ─────────────────────────────────────────
 
 model JournalLine {
   id          String   @id @default(uuid())
@@ -304,33 +411,34 @@ model JournalLine {
   line_order  Int      @default(1)
   created_at  DateTime @default(now())
 
-  entry   JournalEntry @relation(fields: [entry_id], references: [id], onDelete: Cascade)
-  company Company      @relation(fields: [company_id], references: [id], onDelete: Cascade)
-  account Account      @relation(fields: [account_id], references: [id])
+  entry             JournalEntry    @relation(fields: [entry_id], references: [id], onDelete: Cascade)
+  company           Company         @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  account           Account         @relation(fields: [account_id], references: [id])
+  bank_transactions BankTransaction[]
 
   @@map("journal_lines")
 }
 
-// ─────────────────────────────────────────
-//  THIRD PARTY (Clients / Fournisseurs)
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  TIERS (Clients / Fournisseurs)
+// ═══════════════════════════════════════════════════════════
 
 model ThirdParty {
-  id          String   @id @default(uuid())
-  company_id  String
-  type        String   // 'client' | 'fournisseur' | 'both'
-  name        String
-  siret       String?
-  tax_id      String?
-  email       String?
-  phone       String?
-  address     String?
-  city        String?
-  country     String?
-  account_id  String?
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id         String   @id @default(uuid())
+  company_id String
+  type       String   // 'client' | 'fournisseur' | 'both'
+  name       String
+  siret      String?
+  tax_id     String?
+  email      String?
+  phone      String?
+  address    String?
+  city       String?
+  country    String?
+  account_id String?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   company Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
   account Account? @relation(fields: [account_id], references: [id])
@@ -338,21 +446,21 @@ model ThirdParty {
   @@map("third_parties")
 }
 
-// ─────────────────────────────────────────
-//  BUDGET
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  BUDGETS
+// ═══════════════════════════════════════════════════════════
 
 model Budget {
-  id              String   @id @default(uuid())
-  company_id      String
-  fiscal_year_id  String
-  account_id      String
-  month           Int
-  amount          Decimal  @default(0) @db.Decimal(18, 2)
-  note            String?
-  created_by      String
-  created_at      DateTime @default(now())
-  updated_at      DateTime @updatedAt
+  id             String   @id @default(uuid())
+  company_id     String
+  fiscal_year_id String
+  account_id     String
+  month          Int
+  amount         Decimal  @default(0) @db.Decimal(18, 2)
+  note           String?
+  created_by     String
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
   company     Company    @relation(fields: [company_id], references: [id], onDelete: Cascade)
   fiscal_year FiscalYear @relation(fields: [fiscal_year_id], references: [id])
@@ -363,15 +471,229 @@ model Budget {
   @@map("budgets")
 }
 
+// ═══════════════════════════════════════════════════════════
+//  IMMOBILISATIONS & AMORTISSEMENTS
+// ═══════════════════════════════════════════════════════════
+
+model FixedAsset {
+  id                        String             @id @default(uuid())
+  company_id                String
+  name                      String
+  description               String?
+  reference                 String?
+  // Comptes comptables liés
+  asset_account_id          String?            // ex: 211 Terrains, 215 Matériel
+  depreciation_account_id   String?            // ex: 681 Dotations aux amortissements
+  accumulated_account_id    String?            // ex: 281 Amort. terrains
+  // Valeurs
+  acquisition_date          DateTime
+  commissioning_date        DateTime?
+  gross_value               Decimal            @db.Decimal(18, 2)
+  residual_value            Decimal            @default(0) @db.Decimal(18, 2)
+  // Amortissement
+  useful_life_years         Int
+  depreciation_method       DepreciationMethod @default(lineaire)
+  degressive_rate           Decimal?           @db.Decimal(5, 4) // taux dégressif (ex: 0.3333)
+  // Statut
+  status                    AssetStatus        @default(en_service)
+  disposal_date             DateTime?
+  disposal_value            Decimal?           @db.Decimal(18, 2)
+  disposal_journal_entry_id String?
+  // Méta
+  location                  String?
+  serial_number             String?
+  supplier                  String?
+  is_active                 Boolean            @default(true)
+  created_at                DateTime           @default(now())
+  updated_at                DateTime           @updatedAt
+
+  company              Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  asset_account        Account?          @relation("AssetAccount", fields: [asset_account_id], references: [id])
+  depreciation_account Account?          @relation("DepreciationChargeAccount", fields: [depreciation_account_id], references: [id])
+  accumulated_account  Account?          @relation("AccumulatedDepreciationAccount", fields: [accumulated_account_id], references: [id])
+  depreciation_lines   DepreciationLine[]
+
+  @@map("fixed_assets")
+}
+
+model DepreciationLine {
+  id                  String   @id @default(uuid())
+  asset_id            String
+  company_id          String
+  fiscal_year_id      String
+  period_start        DateTime
+  period_end          DateTime
+  gross_value         Decimal  @db.Decimal(18, 2)
+  depreciation_amount Decimal  @db.Decimal(18, 2)
+  accumulated_amount  Decimal  @db.Decimal(18, 2)
+  net_book_value      Decimal  @db.Decimal(18, 2)
+  is_posted           Boolean  @default(false)
+  journal_entry_id    String?
+  created_at          DateTime @default(now())
+
+  asset       FixedAsset @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  fiscal_year FiscalYear @relation(fields: [fiscal_year_id], references: [id])
+
+  @@unique([asset_id, fiscal_year_id])
+  @@map("depreciation_lines")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DOCUMENTS & PIÈCES JUSTIFICATIVES
+// ═══════════════════════════════════════════════════════════
+
+model Document {
+  id                String         @id @default(uuid())
+  company_id        String
+  journal_entry_id  String?
+  uploaded_by       String
+  name              String
+  original_filename String
+  file_url          String
+  file_key          String?        // clé S3/stockage
+  mime_type         String
+  file_size_bytes   Int
+  document_type     DocumentType   @default(autre)
+  source            DocumentSource @default(upload_web)
+  // OCR
+  ocr_processed     Boolean        @default(false)
+  ocr_data          Json?          // { montant, date, fournisseur, tva, ... }
+  ocr_confidence    Float?
+  // Méta
+  note              String?
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @updatedAt
+
+  company       Company      @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  journal_entry JournalEntry? @relation(fields: [journal_entry_id], references: [id], onDelete: SetNull)
+  uploader      User         @relation(fields: [uploaded_by], references: [id])
+
+  @@map("documents")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DÉCLARATIONS FISCALES (TVA, IS, DSF…)
+// ═══════════════════════════════════════════════════════════
+
+model TaxDeclaration {
+  id             String            @id @default(uuid())
+  company_id     String
+  fiscal_year_id String
+  tax_type       TaxType
+  period_start   DateTime
+  period_end     DateTime
+  status         DeclarationStatus @default(brouillon)
+  // Données calculées (JSON flexible selon type)
+  computed_data  Json?
+  tax_base       Decimal?          @db.Decimal(18, 2)
+  tax_amount     Decimal?          @db.Decimal(18, 2)
+  // Fichiers générés
+  pdf_url        String?
+  xlsx_url       String?
+  // Workflow
+  validated_by   String?
+  validated_at   DateTime?
+  submitted_at   DateTime?
+  created_at     DateTime          @default(now())
+  updated_at     DateTime          @updatedAt
+
+  company     Company    @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  fiscal_year FiscalYear @relation(fields: [fiscal_year_id], references: [id])
+
+  @@map("tax_declarations")
+}
+
 // ─────────────────────────────────────────
-//  FINANCIAL ALERT
+//  MAPPING COMPTES → LIGNES DSF
 // ─────────────────────────────────────────
+
+model DsfMapping {
+  id               String           @id @default(uuid())
+  accounting_system AccountingSystem
+  account_code_start String         // début de plage ex: "211"
+  account_code_end   String?        // fin de plage (optionnel)
+  dsf_section      String           // ex: "AI", "BJ", "RA"
+  dsf_line         String           // ex: "AI20", "BJ32"
+  dsf_label        String
+  sign             Int              @default(1)    // 1 ou -1
+  financial_state  String           // 'bilan_actif'|'bilan_passif'|'resultat'|'tafire'
+  note             String?
+  created_at       DateTime         @default(now())
+
+  @@unique([accounting_system, account_code_start, dsf_line])
+  @@map("dsf_mappings")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BANQUE & RAPPROCHEMENT BANCAIRE
+// ═══════════════════════════════════════════════════════════
+
+model BankAccount {
+  id                  String   @id @default(uuid())
+  company_id          String
+  name                String
+  bank_name           String
+  iban                String?
+  bic                 String?
+  account_number      String?
+  currency            Currency @default(EUR)
+  current_balance     Decimal  @default(0) @db.Decimal(18, 2)
+  last_reconciled_at  DateTime?
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  company      Company           @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  transactions BankTransaction[]
+
+  @@map("bank_accounts")
+}
+
+model BankTransaction {
+  id               String   @id @default(uuid())
+  bank_account_id  String
+  company_id       String
+  transaction_date DateTime
+  value_date       DateTime?
+  description      String
+  amount           Decimal  @db.Decimal(18, 2) // + = crédit, - = débit
+  is_reconciled    Boolean  @default(false)
+  journal_line_id  String?
+  import_batch     String?  // référence import fichier
+  created_at       DateTime @default(now())
+
+  bank_account BankAccount  @relation(fields: [bank_account_id], references: [id], onDelete: Cascade)
+  journal_line JournalLine? @relation(fields: [journal_line_id], references: [id], onDelete: SetNull)
+
+  @@map("bank_transactions")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ANALYSE FINANCIÈRE — INDICATEURS CLÉS
+// ═══════════════════════════════════════════════════════════
+
+model FinancialIndicator {
+  id             String   @id @default(uuid())
+  company_id     String
+  fiscal_year_id String?
+  period         String   // ex: "2025-Q1", "2025-12"
+  indicator_type String   // 'caf', 'tresorerie_nette', 'rentabilite', 'endettement', 'seuil_rentabilite'
+  value          Decimal  @db.Decimal(18, 2)
+  computed_at    DateTime @default(now())
+
+  @@map("financial_indicators")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ALERTES FINANCIÈRES
+// ═══════════════════════════════════════════════════════════
 
 model FinancialAlert {
   id           String    @id @default(uuid())
   company_id   String
   type         AlertType
   message      String
+  metadata     Json?     // données contextuelles de l'alerte
   is_read      Boolean   @default(false)
   triggered_at DateTime  @default(now())
   read_at      DateTime?
@@ -381,15 +703,16 @@ model FinancialAlert {
   @@map("financial_alerts")
 }
 
-// ─────────────────────────────────────────
-//  AI CONVERSATION
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  IA — CONVERSATIONS & MESSAGES
+// ═══════════════════════════════════════════════════════════
 
 model AiConversation {
   id         String   @id @default(uuid())
   user_id    String
   company_id String?
   title      String?
+  context    Json?    // contexte financier injecté dans le prompt
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -413,22 +736,75 @@ model AiMessage {
   @@map("ai_messages")
 }
 
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  EXPORTS
+// ═══════════════════════════════════════════════════════════
+
+model ExportLog {
+  id             String      @id @default(uuid())
+  company_id     String
+  user_id        String
+  fiscal_year_id String?
+  export_type    ExportType
+  format         ExportFormat
+  period_start   DateTime?
+  period_end     DateTime?
+  file_url       String?
+  file_key       String?
+  file_size_bytes Int?
+  status         String      @default("pending") // 'pending'|'done'|'error'
+  error_message  String?
+  created_at     DateTime    @default(now())
+
+  company     Company     @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [user_id], references: [id])
+  fiscal_year FiscalYear? @relation(fields: [fiscal_year_id], references: [id], onDelete: SetNull)
+
+  @@map("export_logs")
+}
+
+// ═══════════════════════════════════════════════════════════
+//  OFFLINE SYNC (mobile)
+// ═══════════════════════════════════════════════════════════
+
+model SyncQueue {
+  id            String         @id @default(uuid())
+  device_id     String
+  user_id       String
+  company_id    String
+  operation     SyncOperation
+  table_name    String
+  record_id     String
+  payload       Json
+  client_version Int           @default(1)
+  status        SyncStatus     @default(pending)
+  error_message String?
+  created_at    DateTime       @default(now())
+  synced_at     DateTime?
+
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [company_id], references: [id], onDelete: Cascade)
+
+  @@index([status, created_at])
+  @@map("sync_queue")
+}
+
+// ═══════════════════════════════════════════════════════════
 //  AUDIT LOG
-// ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
 
 model AuditLog {
-  id          String   @id @default(uuid())
-  user_id     String?
-  company_id  String?
-  action      String
-  table_name  String?
-  record_id   String?
-  old_values  Json?
-  new_values  Json?
-  ip_address  String?
-  user_agent  String?
-  created_at  DateTime @default(now())
+  id         String   @id @default(uuid())
+  user_id    String?
+  company_id String?
+  action     String
+  table_name String?
+  record_id  String?
+  old_values Json?
+  new_values Json?
+  ip_address String?
+  user_agent String?
+  created_at DateTime @default(now())
 
   user    User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
   company Company? @relation(fields: [company_id], references: [id], onDelete: SetNull)
