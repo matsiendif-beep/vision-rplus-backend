@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(cd \"C:\\\\Users\\\\matsi\\\\Desktop\\\\vision-rplus\\\\vision-rplus-backend\"; npx tsc --noEmit; echo \"Backend TS: $LASTEXITCODE\")",
-      "PowerShell(cd \"C:\\\\Users\\\\matsi\\\\Desktop\\\\vision-rplus\\\\vision-rplus-frontend\"; npx tsc --noEmit; echo \"Frontend TS: $LASTEXITCODE\")"
-    ]
-  }
-}
