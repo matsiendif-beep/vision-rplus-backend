@@ -40,6 +40,24 @@ export class AnalyticsController {
     return this.service.getBalance(companyId, fiscalYearId);
   }
 
+  @Get('bilan')
+  @ApiOperation({ summary: 'Bilan comptable OHADA (actif / passif)' })
+  getBilan(
+    @Param('companyId') companyId: string,
+    @Query('fiscal_year_id') fiscalYearId: string,
+  ) {
+    return this.service.getBilan(companyId, fiscalYearId);
+  }
+
+  @Get('compte-resultat')
+  @ApiOperation({ summary: 'Compte de résultat OHADA (produits / charges)' })
+  getCompteResultat(
+    @Param('companyId') companyId: string,
+    @Query('fiscal_year_id') fiscalYearId: string,
+  ) {
+    return this.service.getCompteResultat(companyId, fiscalYearId);
+  }
+
   @Get('grand-livre')
   @ApiOperation({ summary: 'Grand livre comptable' })
   getGrandLivre(

@@ -227,3 +227,137 @@ export class AnalyticsService {
       .reduce((s, b) => s + b.solde, 0);
   }
 }
+
+  // ── Bilan OHADA ───────────────────────────────────────────
+  async getBilan(companyId: string, fiscalYearId: string) {
+    const balances = await this.getBalances(companyId, fiscalYearId);
+
+    const solde = (prefix: string) => this.sumByPrefix(balances, prefix);
+
+    // ACTIF
+    const immoCorp   = solde('22') + solde('23') + solde('24') + solde('25');
+    const immoIncorp = solde('21') + solde('20');
+    const immoFin    = solde('26') + solde('27') + solde('28');
+    const stocks     = solde('3');
+    const creancesClients  = solde('411') + solde('412');
+    const autresCreances   = Math.max(0,
+      balances.filter(b => b.account_code.startsWith('4') &&
+        !b.account_code.startsWith('401') &&
+        !b.account_code.startsWith('402') &&
+        !b.account_code.startsWith('411') &&
+        !b.account_code.startsWith('412'))
+        .reduce((s, b) => s + Math.max(0, b.solde), 0)
+    );
+    const tresorerieActif = Math.max(0, solde('5'));
+
+    const totalActif = immoCorp + immoIncorp + immoFin + stocks + creancesClients + autresCreances + tresorerieActif;
+
+    // PASSIF
+    const capital    = Math.abs(solde('101') + solde('102') + solde('103') + solde('104'));
+    const reserves   = Math.abs(solde('11') + solde('12') + solde('13'));
+    const produits   = this.sumByPrefix(balances, '7');
+    const charges    = this.sumByPrefix(balances, '6');
+    const resultatNet = produits - charges;
+    const empruntsLT  = Math.abs(solde('16') + solde('17') + solde('18'));
+    const fournisseurs = Math.abs(solde('401') + solde('402'));
+    const autresDettes = Math.abs(
+      balances.filter(b => b.account_code.startsWith('4') &&
+        !b.account_code.startsWith('401') &&
+        !b.account_code.startsWith('402') &&
+        !b.account_code.startsWith('411') &&
+        !b.account_code.startsWith('412'))
+        .reduce((s, b) => s + Math.min(0, b.solde), 0)
+    );
+    const tresoreriePassif = Math.abs(Math.min(0, solde('5')));
+
+    const totalPassif = capital + reserves + resultatNet + empruntsLT + fournisseurs + autresDettes + tresoreriePassif;
+
+    return {
+      actif: {
+        immobilisations: {
+          incorporelles: immoIncorp,
+          corporelles:   immoCorp,
+          financieres:   immoFin,
+          total:         immoIncorp + immoCorp + immoFin,
+        },
+        actif_circulant: {
+          stocks,
+          creances_clients:  creancesClients,
+          autres_creances:   autresCreances,
+          total:             stocks + creancesClients + autresCreances,
+        },
+        tresorerie_actif: tresorerieActif,
+        total_actif:      totalActif,
+      },
+      passif: {
+        capitaux_propres: {
+          capital,
+          reserves,
+          resultat_net:  resultatNet,
+          total:         capital + reserves + resultatNet,
+        },
+        dettes_financieres: {
+          emprunts_lt:  empruntsLT,
+          total:        empruntsLT,
+        },
+        passif_circulant: {
+          fournisseurs,
+          autres_dettes: autresDettes,
+          total:         fournisseurs + autresDettes,
+        },
+        tresorerie_passif: tresoreriePassif,
+        total_passif:      totalPassif,
+      },
+      equilibre: Math.abs(totalActif - totalPassif) < 1,
+    };
+  }
+
+  // ── Compte de résultat OHADA ──────────────────────────────
+  async getCompteResultat(companyId: string, fiscalYearId: string) {
+    const balances = await this.getBalances(companyId, fiscalYearId);
+    const solde = (prefix: string) => Math.abs(this.sumByPrefix(balances, prefix));
+
+    // Produits
+    const ca        = solde('70') + solde('71') + solde('72');
+    const subvExpl  = solde('74');
+    const autresProd = solde('75') + solde('77') + solde('79');
+    const prodFin   = solde('76');
+    const totalProduits = ca + subvExpl + autresProd + prodFin;
+
+    // Charges
+    const achats         = solde('60') + solde('61');
+    const servicesExt    = solde('62');
+    const impotsTaxes    = solde('63');
+    const chargesPers    = solde('64');
+    const autresCharges  = solde('65');
+    const chargesFin     = solde('66');
+    const dotations      = solde('68');
+    const impotResultat  = solde('89');
+    const totalCharges   = achats + servicesExt + impotsTaxes + chargesPers + autresCharges + chargesFin + dotations + impotResultat;
+
+    const resultatNet = totalProduits - totalCharges;
+
+    return {
+      produits: {
+        chiffre_affaires:    ca,
+        subventions_expl:    subvExpl,
+        autres_produits:     autresProd,
+        produits_financiers: prodFin,
+        total_produits:      totalProduits,
+      },
+      charges: {
+        achats_variation_stocks:  achats,
+        services_exterieurs:      servicesExt,
+        impots_taxes:             impotsTaxes,
+        charges_personnel:        chargesPers,
+        autres_charges:           autresCharges,
+        charges_financieres:      chargesFin,
+        dotations_amortissements: dotations,
+        impot_sur_resultat:       impotResultat,
+        total_charges:            totalCharges,
+      },
+      resultat_net:    resultatNet,
+      nature:          resultatNet >= 0 ? 'benefice' : 'perte',
+      marge_brute:     ca > 0 ? Math.round((resultatNet / ca) * 10000) / 100 : 0,
+    };
+  }
