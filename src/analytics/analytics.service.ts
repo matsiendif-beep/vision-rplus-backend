@@ -19,7 +19,7 @@ export class AnalyticsService {
     const totalCharges  =  this.sumByPrefix(balances, '6'); // Classe 6: solde débiteur (positif)
     const resultatNet   = totalProduits - totalCharges;
 
-    const tresorerie = this.sumByPrefix(balances, '5') + this.sumByPrefix(balances, '53');
+    const tresorerie = this.sumByPrefix(balances, '5');
     const clientsNet = this.sumByPrefix(balances, '411');
     const foursNet   = this.sumByPrefix(balances, '401');
 
