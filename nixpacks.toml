@@ -11,4 +11,4 @@ cmds = [
 ]
 
 [start]
-cmd = "(npx prisma db seed || echo 'Seed already done') && node dist/src/main"
+cmd = "node dist/src/main"
