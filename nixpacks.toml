@@ -11,4 +11,4 @@ cmds = [
 ]
 
 [start]
-cmd = "node dist/src/main"
+cmd = "(timeout 30 npx prisma migrate deploy; echo migrate-done) && node dist/src/main"
