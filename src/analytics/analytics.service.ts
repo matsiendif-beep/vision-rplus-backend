@@ -15,8 +15,8 @@ export class AnalyticsService {
 
     const balances = await this.getBalances(companyId, fiscalYearId);
 
-    const totalProduits = this.sumByPrefix(balances, '7');
-    const totalCharges  = this.sumByPrefix(balances, '6');
+    const totalProduits = -this.sumByPrefix(balances, '7'); // Classe 7: solde créditeur (négatif) → inversé
+    const totalCharges  =  this.sumByPrefix(balances, '6'); // Classe 6: solde débiteur (positif)
     const resultatNet   = totalProduits - totalCharges;
 
     const tresorerie = this.sumByPrefix(balances, '5') + this.sumByPrefix(balances, '53');
@@ -50,8 +50,8 @@ export class AnalyticsService {
   // ── KPIs financiers ───────────────────────────────────────
   async getKpis(companyId: string, fiscalYearId: string) {
     const balances = await this.getBalances(companyId, fiscalYearId);
-    const produits = this.sumByPrefix(balances, '7');
-    const charges  = this.sumByPrefix(balances, '6');
+    const produits = -this.sumByPrefix(balances, '7');
+    const charges  =  this.sumByPrefix(balances, '6');
     return this.computeKpis(balances, produits, charges);
   }
 
@@ -254,8 +254,8 @@ export class AnalyticsService {
     // PASSIF
     const capital    = Math.abs(solde('101') + solde('102') + solde('103') + solde('104'));
     const reserves   = Math.abs(solde('11') + solde('12') + solde('13'));
-    const produits   = this.sumByPrefix(balances, '7');
-    const charges    = this.sumByPrefix(balances, '6');
+    const produits   = -this.sumByPrefix(balances, '7'); // Classe 7: solde créditeur → inversé
+    const charges    =  this.sumByPrefix(balances, '6'); // Classe 6: solde débiteur
     const resultatNet = produits - charges;
     const empruntsLT  = Math.abs(solde('16') + solde('17') + solde('18'));
     const fournisseurs = Math.abs(solde('401') + solde('402'));
