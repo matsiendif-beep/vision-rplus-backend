@@ -226,7 +226,6 @@ export class AnalyticsService {
       .filter(b => b.account_code.startsWith(prefix))
       .reduce((s, b) => s + b.solde, 0);
   }
-}
 
   // ── Bilan OHADA ───────────────────────────────────────────
   async getBilan(companyId: string, fiscalYearId: string) {
@@ -361,3 +360,4 @@ export class AnalyticsService {
       marge_brute:     ca > 0 ? Math.round((resultatNet / ca) * 10000) / 100 : 0,
     };
   }
+}

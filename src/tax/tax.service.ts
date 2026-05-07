@@ -87,7 +87,7 @@ export class TaxService {
     const actif  = dsf.bilan_actif.total;
     const passif = dsf.bilan_passif.total;
     const ecart  = Math.abs(actif - passif);
-    dsf.controles = {
+    const controles = {
       bilan_equilibre:  ecart < 1,
       ecart_bilan:      ecart,
       coherence_resultat: Math.abs(
@@ -99,6 +99,7 @@ export class TaxService {
       company:     { name: company.name, country: company.country },
       fiscal_year: { label: fiscalYear.label, start: fiscalYear.start_date, end: fiscalYear.end_date },
       ...dsf,
+      controles,
     };
   }
 
