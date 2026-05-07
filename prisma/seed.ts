@@ -515,11 +515,6 @@ const ohada = [
 async function main() {
   console.log('VISION R+ — Plan Comptable OHADA complet (classes 1 à 8, adapté Gabon)...');
 
-  // Remplacement complet des comptes système OHADA
-  await prisma.account.deleteMany({
-    where: { company_id: null, system: 'ohada' },
-  });
-
   const result = await prisma.account.createMany({
     data: ohada.map((c) => ({
       code:       c.code,
