@@ -11,11 +11,13 @@ import { TaxModule }         from './tax/tax.module';
 import { AnalyticsModule }   from './analytics/analytics.module';
 import { BankModule }        from './bank/bank.module';
 import { SyncModule }        from './sync/sync.module';
+import { SeedModule }        from './seed/seed.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    SeedModule,
 
     // ── Modules existants ────────────────────────────────
     AuthModule,
