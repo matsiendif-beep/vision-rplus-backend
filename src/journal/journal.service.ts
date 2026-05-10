@@ -480,6 +480,49 @@ export class JournalService {
   }
 
   // ══════════════════════════════════════════════════════════
+  //  EXPORT CSV
+  //  Retourne le contenu CSV de toutes les écritures (avec leurs lignes)
+  // ══════════════════════════════════════════════════════════
+  async exportCsv(companyId: string, fiscalYearId?: string): Promise<string> {
+    const entries = await this.prisma.journalEntry.findMany({
+      where: {
+        company_id:     companyId,
+        ...(fiscalYearId && { fiscal_year_id: fiscalYearId }),
+      },
+      include: {
+        lines: {
+          include: { account: { select: { code: true, label: true } } },
+          orderBy: { line_order: 'asc' },
+        },
+      },
+      orderBy: { entry_date: 'asc' },
+    });
+
+    const header = 'date,piece,compte,libelle_compte,tiers,libelle,debit,credit,journal_type,statut';
+    const rows: string[] = [header];
+
+    for (const entry of entries) {
+      for (const line of entry.lines) {
+        const cols = [
+          entry.entry_date.toISOString().slice(0, 10),
+          entry.reference ?? '',
+          line.account?.code ?? '',
+          line.account?.label ?? '',
+          `"${(line.libelle ?? '').replace(/"/g, '""')}"`,
+          `"${entry.libelle.replace(/"/g, '""')}"`,
+          line.debit.toString(),
+          line.credit.toString(),
+          entry.journal_type,
+          entry.status,
+        ];
+        rows.push(cols.join(','));
+      }
+    }
+
+    return rows.join('\r\n');
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  IMPORT CSV
   //  Format attendu : date,piece,compte,tiers,libelle,debit,credit,journal_type
   //  Les lignes sont groupées par (piece + date + libelle) en une seule écriture
@@ -507,6 +550,17 @@ export class JournalService {
     });
     const accountByCode = new Map(accounts.map((a) => [a.code.trim(), a.id]));
 
+    // Résolution par préfixe décroissant : '706100' → '7061' → '706' → '70'
+    const resolveAccount = (code: string): string | undefined => {
+      const trimmed = code.trim();
+      if (accountByCode.has(trimmed)) return accountByCode.get(trimmed);
+      for (let len = trimmed.length - 1; len >= 2; len--) {
+        const prefix = trimmed.slice(0, len);
+        if (accountByCode.has(prefix)) return accountByCode.get(prefix);
+      }
+      return undefined;
+    };
+
     // Parser le CSV (ignorer la première ligne = en-têtes)
     type CsvRow = { date: string; piece: string; compte: string; tiers: string; libelle: string; debit: number; credit: number; journal_type: string };
     const rows: CsvRow[] = [];
@@ -518,9 +572,9 @@ export class JournalService {
       const [date, piece, compte, tiers, libelle, debitStr, creditStr, journal_type] = cols;
       if (!date || !piece || !compte) continue;
 
-      const accountId = accountByCode.get(compte);
+      const accountId = resolveAccount(compte);
       if (!accountId) {
-        errors.push(`Ligne ${i + 1}: compte "${compte}" introuvable`);
+        errors.push(`Ligne ${i + 1}: compte "${compte}" introuvable (ni exact ni par préfixe)`);
         continue;
       }
 
@@ -577,7 +631,7 @@ export class JournalService {
           data: groupRows.map((r, idx) => ({
             entry_id:   entry.id,
             company_id: companyId,
-            account_id: accountByCode.get(r.compte)!,
+            account_id: resolveAccount(r.compte)!,
             libelle:    r.tiers || r.libelle,
             debit:      r.debit,
             credit:     r.credit,
