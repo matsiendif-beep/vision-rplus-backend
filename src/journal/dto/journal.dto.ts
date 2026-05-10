@@ -23,11 +23,13 @@ export class JournalLineDto {
   libelle?: string;
 
   @ApiProperty({ example: 1200, description: 'Montant débit (0 si ligne crédit)' })
+  @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   debit: number;
 
   @ApiProperty({ example: 0, description: 'Montant crédit (0 si ligne débit)' })
+  @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   credit: number;

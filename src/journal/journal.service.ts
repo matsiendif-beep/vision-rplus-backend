@@ -249,40 +249,49 @@ export class JournalService {
       totalCredit = filteredLines.reduce((s, l) => s + l.credit, 0);
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // Mettre à jour l'en-tête
-      await tx.journalEntry.update({
-        where: { id: entryId },
-        data: {
-          journal_type:   dto.journal_type,
-          entry_date:     dto.entry_date ? new Date(dto.entry_date) : undefined,
-          libelle:        dto.libelle,
-          reference:      dto.reference,
-          total_debit:    totalDebit,
-          total_credit:   totalCredit,
-        },
-      });
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Mettre à jour l'en-tête
+        await tx.journalEntry.update({
+          where: { id: entryId },
+          data: {
+            ...(dto.journal_type !== undefined && { journal_type: dto.journal_type }),
+            ...(dto.entry_date   !== undefined && { entry_date:   new Date(dto.entry_date) }),
+            ...(dto.libelle      !== undefined && { libelle:      dto.libelle }),
+            ...(dto.reference    !== undefined && { reference:    dto.reference }),
+            total_debit:  totalDebit,
+            total_credit: totalCredit,
+          },
+        });
 
-      // Si nouvelles lignes : supprimer les anciennes et recréer (lignes valides seulement)
-      if (filteredLines !== undefined) {
-        await tx.journalLine.deleteMany({ where: { entry_id: entryId } });
-        if (filteredLines.length > 0) {
-          await tx.journalLine.createMany({
-            data: filteredLines.map((line, index) => ({
-              entry_id:   entryId,
-              company_id: companyId,
-              account_id: line.account_id!,
-              libelle:    line.libelle,
-              debit:      line.debit,
-              credit:     line.credit,
-              line_order: index + 1,
-            })),
-          });
+        // Si nouvelles lignes : supprimer les anciennes et recréer
+        if (filteredLines !== undefined) {
+          await tx.journalLine.deleteMany({ where: { entry_id: entryId } });
+          if (filteredLines.length > 0) {
+            await tx.journalLine.createMany({
+              data: filteredLines.map((line, index) => ({
+                entry_id:   entryId,
+                company_id: companyId,
+                account_id: line.account_id!,
+                libelle:    line.libelle ?? null,
+                debit:      line.debit,
+                credit:     line.credit,
+                line_order: index + 1,
+              })),
+            });
+          }
         }
-      }
+      });
+    } catch (err: any) {
+      this.logger.error(`updateEntry error: ${err?.message ?? err}`, err?.stack);
+      if (err?.code === 'P2025') throw new NotFoundException('Écriture introuvable lors de la mise à jour');
+      if (err?.code === 'P2003') throw new BadRequestException('Compte introuvable — vérifiez le plan de comptes');
+      if (err?.code === 'P2034') throw new BadRequestException('Mise à jour échouée (timeout) — réessayez');
+      throw new BadRequestException(`Erreur lors de la mise à jour : ${err?.message ?? 'inconnue'}`);
+    }
 
-      return this.findOneEntry(entryId, companyId);
-    });
+    // findOneEntry en dehors de la transaction pour lire l'état committé
+    return this.findOneEntry(entryId, companyId);
   }
 
   // ══════════════════════════════════════════════════════════
