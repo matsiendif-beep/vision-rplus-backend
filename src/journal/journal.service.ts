@@ -613,15 +613,15 @@ export class JournalService {
       grouped.get(key)!.push(row);
     }
 
-    // Créer les écritures en base
-    let created = 0;
+    // Pré-valider tous les groupes avant d'écrire en base
+    type ValidGroup = { first: CsvRow; groupRows: CsvRow[]; totalDebit: number; totalCredit: number; entryDate: Date };
+    const validGroups: ValidGroup[] = [];
     let skipped = 0;
 
     for (const [, groupRows] of grouped) {
       const first     = groupRows[0];
       const entryDate = new Date(first.date);
 
-      // Vérifier que la date est dans l'exercice
       if (entryDate < fiscalYear.start_date || entryDate > fiscalYear.end_date) {
         skipped++;
         errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — hors exercice, ignorée`);
@@ -631,50 +631,59 @@ export class JournalService {
       const totalDebit  = groupRows.reduce((s, r) => s + r.debit,  0);
       const totalCredit = groupRows.reduce((s, r) => s + r.credit, 0);
 
-      // Refuser les écritures avec moins de 2 lignes (comptes résolus)
       if (groupRows.length < 2) {
         skipped++;
-        errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — une seule ligne comptable, écriture ignorée (vérifiez les codes comptes)`);
+        errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — une seule ligne comptable, ignorée (vérifiez les codes comptes)`);
         continue;
       }
 
-      // Refuser les écritures non équilibrées
       if (Math.abs(totalDebit - totalCredit) > 0.01) {
         skipped++;
         errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — déséquilibrée (débit ${totalDebit.toFixed(2)} ≠ crédit ${totalCredit.toFixed(2)}), ignorée`);
         continue;
       }
 
-      await this.prisma.$transaction(async (tx) => {
-        const entry = await tx.journalEntry.create({
-          data: {
-            company_id:     companyId,
-            fiscal_year_id: fiscalYear.id,
-            journal_type:   first.journal_type as any,
-            entry_date:     entryDate,
-            libelle:        first.libelle,
-            reference:      first.piece || null,
-            total_debit:    totalDebit,
-            total_credit:   totalCredit,
-            status:         'brouillon',
-            created_by:     userId,
-          },
-        });
+      validGroups.push({ first, groupRows, totalDebit, totalCredit, entryDate });
+    }
 
-        await tx.journalLine.createMany({
-          data: groupRows.map((r, idx) => ({
-            entry_id:   entry.id,
-            company_id: companyId,
-            account_id: resolveAccount(r.compte)!,
-            libelle:    r.tiers || r.libelle || null,
-            debit:      r.debit,
-            credit:     r.credit,
-            line_order: idx + 1,
-          })),
-        });
-      });
+    // Créer toutes les écritures valides en UNE SEULE transaction (beaucoup plus rapide)
+    let created = 0;
+    if (validGroups.length > 0) {
+      await this.prisma.$transaction(
+        async (tx) => {
+          for (const { first, groupRows, totalDebit, totalCredit, entryDate } of validGroups) {
+            const entry = await tx.journalEntry.create({
+              data: {
+                company_id:     companyId,
+                fiscal_year_id: fiscalYear.id,
+                journal_type:   first.journal_type as any,
+                entry_date:     entryDate,
+                libelle:        first.libelle,
+                reference:      first.piece || null,
+                total_debit:    totalDebit,
+                total_credit:   totalCredit,
+                status:         'brouillon',
+                created_by:     userId,
+              },
+            });
 
-      created++;
+            await tx.journalLine.createMany({
+              data: groupRows.map((r, idx) => ({
+                entry_id:   entry.id,
+                company_id: companyId,
+                account_id: resolveAccount(r.compte)!,
+                libelle:    r.tiers || r.libelle || null,
+                debit:      r.debit,
+                credit:     r.credit,
+                line_order: idx + 1,
+              })),
+            });
+
+            created++;
+          }
+        },
+        { timeout: 30_000 }, // 30s max pour les gros fichiers
+      );
     }
 
     this.logger.log(`Import CSV: ${created} écritures créées, ${skipped} ignorées, ${errors.length} erreurs`);
