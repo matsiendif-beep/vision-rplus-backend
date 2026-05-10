@@ -280,6 +280,30 @@ export class JournalService {
   }
 
   // ══════════════════════════════════════════════════════════
+  //  SUPPRIMER UNE ÉCRITURE (brouillon uniquement)
+  // ══════════════════════════════════════════════════════════
+  async deleteEntry(entryId: string, companyId: string) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id: entryId, company_id: companyId },
+    });
+    if (!entry) throw new NotFoundException('Écriture introuvable');
+    if (entry.status !== 'brouillon') {
+      throw new ForbiddenException(
+        'Seules les écritures en brouillon peuvent être supprimées. ' +
+        'Pour annuler une écriture validée, utilisez la contrepassation.',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalLine.deleteMany({ where: { entry_id: entryId } });
+      await tx.journalEntry.delete({ where: { id: entryId } });
+    });
+
+    this.logger.log(`Écriture supprimée : ${entryId}`);
+    return { message: 'Écriture supprimée' };
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  VALIDER UNE ÉCRITURE (brouillon → validée)
   // ══════════════════════════════════════════════════════════
   async validateEntry(entryId: string, companyId: string, userId: string) {
@@ -453,6 +477,174 @@ export class JournalService {
       pending_entries:  draftEntries,
       generated_at:     new Date().toISOString(),
     };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  EXPORT CSV
+  //  Retourne le contenu CSV de toutes les écritures (avec leurs lignes)
+  // ══════════════════════════════════════════════════════════
+  async exportCsv(companyId: string, fiscalYearId?: string): Promise<string> {
+    const entries = await this.prisma.journalEntry.findMany({
+      where: {
+        company_id:     companyId,
+        ...(fiscalYearId && { fiscal_year_id: fiscalYearId }),
+      },
+      include: {
+        lines: {
+          include: { account: { select: { code: true, label: true } } },
+          orderBy: { line_order: 'asc' },
+        },
+      },
+      orderBy: { entry_date: 'asc' },
+    });
+
+    const header = 'date,piece,compte,libelle_compte,tiers,libelle,debit,credit,journal_type,statut';
+    const rows: string[] = [header];
+
+    for (const entry of entries) {
+      for (const line of entry.lines) {
+        const cols = [
+          entry.entry_date.toISOString().slice(0, 10),
+          entry.reference ?? '',
+          line.account?.code ?? '',
+          line.account?.label ?? '',
+          `"${(line.libelle ?? '').replace(/"/g, '""')}"`,
+          `"${entry.libelle.replace(/"/g, '""')}"`,
+          line.debit.toString(),
+          line.credit.toString(),
+          entry.journal_type,
+          entry.status,
+        ];
+        rows.push(cols.join(','));
+      }
+    }
+
+    return rows.join('\r\n');
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  IMPORT CSV
+  //  Format attendu : date,piece,compte,tiers,libelle,debit,credit,journal_type
+  //  Les lignes sont groupées par (piece + date + libelle) en une seule écriture
+  // ══════════════════════════════════════════════════════════
+  async importCsv(companyId: string, userId: string, fileBuffer: Buffer) {
+    const text = fileBuffer.toString('utf-8');
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+
+    if (lines.length < 2) throw new BadRequestException('Fichier CSV vide ou invalide');
+
+    // Trouver le fiscal year ouvert
+    const fiscalYear = await this.prisma.fiscalYear.findFirst({
+      where: { company_id: companyId, is_closed: false },
+      orderBy: { start_date: 'desc' },
+    });
+    if (!fiscalYear) throw new BadRequestException('Aucun exercice fiscal ouvert trouvé');
+
+    // Charger tous les comptes de l'entreprise (y compris système)
+    const accounts = await this.prisma.account.findMany({
+      where: {
+        is_active: true,
+        OR: [{ company_id: companyId }, { company_id: null }],
+      },
+      select: { id: true, code: true },
+    });
+    const accountByCode = new Map(accounts.map((a) => [a.code.trim(), a.id]));
+
+    // Résolution par préfixe décroissant : '706100' → '7061' → '706' → '70'
+    const resolveAccount = (code: string): string | undefined => {
+      const trimmed = code.trim();
+      if (accountByCode.has(trimmed)) return accountByCode.get(trimmed);
+      for (let len = trimmed.length - 1; len >= 2; len--) {
+        const prefix = trimmed.slice(0, len);
+        if (accountByCode.has(prefix)) return accountByCode.get(prefix);
+      }
+      return undefined;
+    };
+
+    // Parser le CSV (ignorer la première ligne = en-têtes)
+    type CsvRow = { date: string; piece: string; compte: string; tiers: string; libelle: string; debit: number; credit: number; journal_type: string };
+    const rows: CsvRow[] = [];
+    const errors: string[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map((c) => c.trim());
+      if (cols.length < 7) continue;
+      const [date, piece, compte, tiers, libelle, debitStr, creditStr, journal_type] = cols;
+      if (!date || !piece || !compte) continue;
+
+      const accountId = resolveAccount(compte);
+      if (!accountId) {
+        errors.push(`Ligne ${i + 1}: compte "${compte}" introuvable (ni exact ni par préfixe)`);
+        continue;
+      }
+
+      rows.push({
+        date, piece, compte, tiers, libelle,
+        debit:  parseFloat(debitStr)  || 0,
+        credit: parseFloat(creditStr) || 0,
+        journal_type: journal_type ?? 'od',
+      });
+    }
+
+    // Grouper par (piece + date + libelle) → une écriture
+    const grouped = new Map<string, CsvRow[]>();
+    for (const row of rows) {
+      const key = `${row.piece}|${row.date}|${row.libelle}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(row);
+    }
+
+    // Créer les écritures en base
+    let created = 0;
+    let skipped = 0;
+
+    for (const [, groupRows] of grouped) {
+      const first     = groupRows[0];
+      const entryDate = new Date(first.date);
+
+      // Vérifier que la date est dans l'exercice
+      if (entryDate < fiscalYear.start_date || entryDate > fiscalYear.end_date) {
+        skipped++;
+        continue;
+      }
+
+      const totalDebit  = groupRows.reduce((s, r) => s + r.debit,  0);
+      const totalCredit = groupRows.reduce((s, r) => s + r.credit, 0);
+
+      await this.prisma.$transaction(async (tx) => {
+        const entry = await tx.journalEntry.create({
+          data: {
+            company_id:     companyId,
+            fiscal_year_id: fiscalYear.id,
+            journal_type:   first.journal_type as any,
+            entry_date:     entryDate,
+            libelle:        first.libelle,
+            reference:      first.piece,
+            total_debit:    totalDebit,
+            total_credit:   totalCredit,
+            status:         'brouillon',
+            created_by:     userId,
+          },
+        });
+
+        await tx.journalLine.createMany({
+          data: groupRows.map((r, idx) => ({
+            entry_id:   entry.id,
+            company_id: companyId,
+            account_id: resolveAccount(r.compte)!,
+            libelle:    r.tiers || r.libelle,
+            debit:      r.debit,
+            credit:     r.credit,
+            line_order: idx + 1,
+          })),
+        });
+      });
+
+      created++;
+    }
+
+    this.logger.log(`Import CSV: ${created} écritures créées, ${skipped} ignorées, ${errors.length} erreurs`);
+    return { created, skipped, errors };
   }
 
   // ── Vérification accès exercice ───────────────────────────

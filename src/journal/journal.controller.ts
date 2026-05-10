@@ -1,8 +1,10 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Body, Param, Query, UseGuards, HttpCode, HttpStatus,
+  Controller, Get, Post, Patch, Delete, HttpCode, HttpStatus,
+  Body, Param, Query, UseGuards,
+  UploadedFile, UseInterceptors, BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { JournalService }    from './journal.service';
 import {
   CreateJournalEntryDto,
@@ -68,6 +70,17 @@ export class JournalController {
     return this.service.updateEntry(entryId, companyId, userId, dto);
   }
 
+  // DELETE /companies/:companyId/entries/:entryId
+  @Delete('entries/:entryId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer une écriture en brouillon' })
+  deleteEntry(
+    @Param('companyId') companyId: string,
+    @Param('entryId')   entryId: string,
+  ) {
+    return this.service.deleteEntry(entryId, companyId);
+  }
+
   // POST /companies/:companyId/entries/:entryId/validate
   @Post('entries/:entryId/validate')
   @HttpCode(HttpStatus.OK)
@@ -78,6 +91,21 @@ export class JournalController {
     @GetUser('id') userId: string,
   ) {
     return this.service.validateEntry(entryId, companyId, userId);
+  }
+
+  // POST /companies/:companyId/entries/import-csv
+  @Post('entries/import-csv')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Importer des écritures depuis un fichier CSV (format Vision R+)' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  importCsv(
+    @Param('companyId') companyId: string,
+    @GetUser('id') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier fourni');
+    return this.service.importCsv(companyId, userId, file.buffer);
   }
 
   // POST /companies/:companyId/entries/:entryId/reverse
