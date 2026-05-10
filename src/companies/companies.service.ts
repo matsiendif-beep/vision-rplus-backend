@@ -1,6 +1,6 @@
 import {
   Injectable, NotFoundException,
-  ForbiddenException, Logger,
+  ForbiddenException, BadRequestException, Logger,
 } from '@nestjs/common';
 import { PrismaService }  from '../prisma/prisma.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
@@ -178,6 +178,46 @@ export class CompaniesService {
     return this.prisma.fiscalYear.findMany({
       where:   { company_id: companyId },
       orderBy: { start_date: 'desc' },
+    });
+  }
+
+  // ── Créer un exercice fiscal ───────────────────────────────
+  async createFiscalYear(
+    companyId: string,
+    userId: string,
+    dto: { label: string; start_date: string; end_date: string },
+  ) {
+    await this.checkOwnership(companyId, userId);
+
+    const start = new Date(dto.start_date);
+    const end   = new Date(dto.end_date);
+
+    if (end <= start) {
+      throw new BadRequestException('La date de fin doit être après la date de début');
+    }
+
+    // Vérifier qu'il n'y a pas de chevauchement
+    const overlap = await this.prisma.fiscalYear.findFirst({
+      where: {
+        company_id: companyId,
+        OR: [
+          { start_date: { lte: end },   end_date: { gte: start } },
+        ],
+      },
+    });
+    if (overlap) {
+      throw new BadRequestException(
+        `Cet exercice chevauche "${overlap.label}" (${overlap.start_date.toISOString().slice(0,10)} → ${overlap.end_date.toISOString().slice(0,10)})`
+      );
+    }
+
+    return this.prisma.fiscalYear.create({
+      data: {
+        company_id: companyId,
+        label:      dto.label,
+        start_date: start,
+        end_date:   end,
+      },
     });
   }
 

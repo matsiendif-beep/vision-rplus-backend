@@ -65,9 +65,25 @@ export class BankService {
     });
     if (!account) throw new NotFoundException('Compte bancaire introuvable');
 
+    // Déduplication : exclure les transactions déjà importées (même date + montant + description)
+    const existing = await this.prisma.bankTransaction.findMany({
+      where: { bank_account_id: bankAccountId },
+      select: { transaction_date: true, amount: true, description: true },
+    });
+    const existingKeys = new Set(
+      existing.map(e => `${e.transaction_date.toISOString().slice(0,10)}|${e.amount}|${e.description}`)
+    );
+
+    const newTransactions = transactions.filter(t => {
+      const key = `${t.transaction_date}|${t.amount}|${t.description}`;
+      return !existingKeys.has(key);
+    });
+
+    const skipped = transactions.length - newTransactions.length;
+
     const batchId = `IMPORT-${Date.now()}`;
     const created = await this.prisma.bankTransaction.createMany({
-      data: transactions.map(t => ({
+      data: newTransactions.map(t => ({
         bank_account_id:  bankAccountId,
         company_id:       companyId,
         transaction_date: new Date(t.transaction_date),
@@ -78,14 +94,14 @@ export class BankService {
       })),
     });
 
-    // Mettre à jour le solde du compte
-    const balance = transactions.reduce((s, t) => s + t.amount, 0);
+    // Mettre à jour le solde uniquement avec les nouvelles transactions
+    const balance = newTransactions.reduce((s, t) => s + t.amount, 0);
     await this.prisma.bankAccount.update({
       where: { id: bankAccountId },
       data: { current_balance: { increment: balance } },
     });
 
-    return { imported: created.count, batch_id: batchId };
+    return { imported: created.count, skipped, batch_id: batchId };
   }
 
   // ── Rapprochement bancaire ────────────────────────────────

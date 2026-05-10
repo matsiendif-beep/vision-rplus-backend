@@ -4,10 +4,17 @@ import {
   Body, Param, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { IsString, IsDateString, IsOptional } from 'class-validator';
 import { CompaniesService }  from './companies.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
 import { JwtAuthGuard }      from '../common/guards/jwt-auth.guard';
 import { GetUser }           from '../common/decorators';
+
+class CreateFiscalYearDto {
+  @IsString()  label: string;
+  @IsDateString() start_date: string;
+  @IsDateString() end_date: string;
+}
 
 @ApiTags('Entreprises')
 @ApiBearerAuth()
@@ -55,6 +62,17 @@ export class CompaniesController {
   @ApiOperation({ summary: 'Exercices fiscaux d\'une entreprise' })
   getFiscalYears(@Param('companyId') companyId: string) {
     return this.service.getFiscalYears(companyId);
+  }
+
+  // POST /companies/:companyId/fiscal-years
+  @Post(':companyId/fiscal-years')
+  @ApiOperation({ summary: 'Créer un nouvel exercice fiscal' })
+  createFiscalYear(
+    @Param('companyId') companyId: string,
+    @GetUser('id') userId: string,
+    @Body() dto: CreateFiscalYearDto,
+  ) {
+    return this.service.createFiscalYear(companyId, userId, dto);
   }
 
   // PATCH /companies/:companyId

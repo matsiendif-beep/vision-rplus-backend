@@ -53,6 +53,7 @@ export class JournalService {
     //    - compte actif dans cette entreprise ou plan système
     const rawLines = dto.lines.filter((l) => l.account_id && (l.debit > 0 || l.credit > 0));
     let validLines = rawLines;
+    const lineWarnings: string[] = [];
     if (rawLines.length > 0) {
       const uniqueIds = [...new Set(rawLines.map((l) => l.account_id!))];
       const accounts  = await this.prisma.account.findMany({
@@ -66,7 +67,11 @@ export class JournalService {
         },
       });
       const validIds = new Set(accounts.map((a) => a.id));
-      validLines = rawLines.filter((l) => validIds.has(l.account_id!));
+      validLines = rawLines.filter((l) => {
+        if (validIds.has(l.account_id!)) return true;
+        lineWarnings.push(`Compte introuvable ou inactif — ligne ignorée (id: ${l.account_id})`);
+        return false;
+      });
     }
 
     const totalDebit  = validLines.reduce((s, l) => s + l.debit,  0);
@@ -107,7 +112,8 @@ export class JournalService {
     });
 
     this.logger.log(`Écriture créée : ${entry.id} | ${entry.libelle} | ${totalDebit}€`);
-    return this.findOneEntry(entry.id, companyId);
+    const created = await this.findOneEntry(entry.id, companyId);
+    return lineWarnings.length > 0 ? { ...created, warnings: lineWarnings } : created;
   }
 
   // ══════════════════════════════════════════════════════════

@@ -1,6 +1,6 @@
 import {
   Injectable, ConflictException,
-  UnauthorizedException, Logger,
+  UnauthorizedException, BadRequestException, Logger,
 } from '@nestjs/common';
 import { JwtService }    from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -109,6 +109,28 @@ export class AuthService {
         },
       },
     });
+  }
+
+  // ── Changer le mot de passe ────────────────────────────────
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+
+    const valid = await argon2.verify(user.password_hash, currentPassword);
+    if (!valid) throw new BadRequestException('Mot de passe actuel incorrect');
+
+    if (newPassword.length < 8) {
+      throw new BadRequestException('Le nouveau mot de passe doit comporter au moins 8 caractères');
+    }
+
+    const newHash = await argon2.hash(newPassword);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data:  { password_hash: newHash },
+    });
+
+    this.logger.log(`Mot de passe changé pour l'utilisateur ${userId}`);
+    return { message: 'Mot de passe mis à jour avec succès' };
   }
 
   // ── Génération des tokens JWT ──────────────────────────────

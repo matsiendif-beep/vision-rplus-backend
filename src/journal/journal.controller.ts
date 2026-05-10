@@ -1,8 +1,9 @@
 import {
   Controller, Get, Post, Patch, Delete, HttpCode, HttpStatus,
-  Body, Param, Query, UseGuards,
+  Body, Param, Query, UseGuards, Res,
   UploadedFile, UseInterceptors, BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { JournalService }    from './journal.service';
@@ -36,6 +37,21 @@ export class JournalController {
     @Body() dto: CreateJournalEntryDto,
   ) {
     return this.service.createEntry(companyId, userId, dto);
+  }
+
+  // GET /companies/:companyId/entries/export-csv
+  @Get('entries/export-csv')
+  @ApiOperation({ summary: 'Exporter le journal en CSV (toutes les écritures avec leurs lignes)' })
+  async exportCsv(
+    @Param('companyId')       companyId: string,
+    @Query('fiscal_year_id')  fiscalYearId: string | undefined,
+    @Res() res: Response,
+  ) {
+    const csv      = await this.service.exportCsv(companyId, fiscalYearId);
+    const filename = `journal_${companyId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('﻿' + csv); // BOM UTF-8 pour Excel
   }
 
   // GET /companies/:companyId/entries

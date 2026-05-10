@@ -42,49 +42,69 @@ export class DocumentsService {
     return doc;
   }
 
-  // ── Enregistrer un document uploadé ─────────────────────
-  // Le fichier est déjà uploadé côté frontend (vers S3/Supabase Storage)
-  // Ce endpoint enregistre les métadonnées
-  async create(
+  // ── Upload direct multipart → stockage base64 en DB ─────
+  async createFromUpload(
     companyId: string,
     userId: string,
-    dto: UploadDocumentDto,
-    fileInfo: {
-      originalname: string;
-      mimetype: string;
-      size: number;
-      url: string;
-      key: string;
-    },
+    file: Express.Multer.File,
+    meta: { document_type?: string; note?: string; journal_entry_id?: string },
   ) {
-    if (dto.journal_entry_id) {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.mimetype)) {
+      throw new BadRequestException('Format non supporté. Utilisez PDF, JPG ou PNG.');
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      throw new BadRequestException('Fichier trop volumineux (max 10 Mo)');
+    }
+
+    if (meta.journal_entry_id) {
       const entry = await this.prisma.journalEntry.findFirst({
-        where: { id: dto.journal_entry_id, company_id: companyId },
+        where: { id: meta.journal_entry_id, company_id: companyId },
       });
       if (!entry) throw new NotFoundException('Écriture introuvable');
     }
 
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-    if (!allowed.includes(fileInfo.mimetype)) {
-      throw new BadRequestException('Format non supporté. Utilisez PDF, JPG ou PNG.');
-    }
+    // Stocker le contenu binaire en base64 dans file_url (data URI)
+    const base64 = file.buffer.toString('base64');
+    const dataUri = `data:${file.mimetype};base64,${base64}`;
 
-    return this.prisma.document.create({
+    const doc = await this.prisma.document.create({
       data: {
-        company_id:       companyId,
-        journal_entry_id: dto.journal_entry_id,
-        uploaded_by:      userId,
-        name:             dto.note ?? fileInfo.originalname,
-        original_filename: fileInfo.originalname,
-        file_url:         fileInfo.url,
-        file_key:         fileInfo.key,
-        mime_type:        fileInfo.mimetype,
-        file_size_bytes:  fileInfo.size,
-        document_type:    (dto.document_type ?? 'autre') as any,
-        source:           'upload_web',
-        note:             dto.note,
+        company_id:        companyId,
+        journal_entry_id:  meta.journal_entry_id ?? null,
+        uploaded_by:       userId,
+        name:              meta.note ?? file.originalname,
+        original_filename: file.originalname,
+        file_url:          dataUri,
+        file_key:          null,
+        mime_type:         file.mimetype,
+        file_size_bytes:   file.size,
+        document_type:     (meta.document_type ?? 'autre') as any,
+        source:            'upload_web',
+        note:              meta.note ?? null,
       },
     });
+
+    this.logger.log(`Document uploadé : ${doc.id} | ${file.originalname} | ${file.size} octets`);
+    // Retourner sans le data URI (trop volumineux pour la réponse JSON de listing)
+    return { ...doc, file_url: undefined, has_file: true };
+  }
+
+  // ── Servir le fichier binaire ────────────────────────────
+  async getFileBuffer(companyId: string, id: string) {
+    const doc = await this.prisma.document.findFirst({
+      where: { id, company_id: companyId },
+      select: { file_url: true, mime_type: true, original_filename: true },
+    });
+    if (!doc) throw new NotFoundException('Document introuvable');
+    if (!doc.file_url?.startsWith('data:')) {
+      throw new BadRequestException('Fichier non disponible');
+    }
+
+    // Décoder le data URI
+    const base64Data = doc.file_url.split(',')[1];
+    const buffer = Buffer.from(base64Data, 'base64');
+    return { buffer, mimeType: doc.mime_type, filename: doc.original_filename };
   }
 
   // ── Lier un document à une écriture ─────────────────────

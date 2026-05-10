@@ -1,14 +1,17 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, Query, UseGuards,
+  Body, Param, Query, Res, UseGuards,
   HttpCode, HttpStatus,
+  UploadedFile, UseInterceptors, BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { DocumentsService }   from './documents.service';
 import { JwtAuthGuard }       from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import { GetUser }            from '../common/decorators';
-import { UploadDocumentDto, LinkDocumentDto } from './dto/documents.dto';
+import { LinkDocumentDto } from './dto/documents.dto';
 
 @ApiTags('Documents & Pièces justificatives')
 @ApiBearerAuth()
@@ -41,29 +44,39 @@ export class DocumentsController {
     return this.service.findOne(companyId, id);
   }
 
-  // Le frontend upload le fichier directement vers Supabase Storage
-  // puis appelle ce endpoint avec les métadonnées + URL
+  // Upload multipart direct — le fichier est stocké côté backend
   @Post()
-  @ApiOperation({ summary: 'Enregistrer les métadonnées d\'un document uploadé' })
-  create(
+  @ApiOperation({ summary: 'Uploader un document (PDF, JPG, PNG — max 10 Mo)' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  async create(
     @Param('companyId') companyId: string,
     @GetUser('id') userId: string,
-    @Body() body: UploadDocumentDto & {
-      original_filename: string;
-      file_url: string;
-      file_key: string;
-      mime_type: string;
-      file_size_bytes: number;
-    },
+    @UploadedFile() file: Express.Multer.File,
+    @Body('document_type') documentType?: string,
+    @Body('note') note?: string,
+    @Body('journal_entry_id') journalEntryId?: string,
   ) {
-    const { original_filename, file_url, file_key, mime_type, file_size_bytes, ...dto } = body;
-    return this.service.create(companyId, userId, dto, {
-      originalname: original_filename,
-      url:          file_url,
-      key:          file_key,
-      mimetype:     mime_type,
-      size:         file_size_bytes,
+    if (!file) throw new BadRequestException('Aucun fichier fourni');
+    return this.service.createFromUpload(companyId, userId, file, {
+      document_type:    documentType,
+      note,
+      journal_entry_id: journalEntryId,
     });
+  }
+
+  // Télécharger / visualiser le fichier
+  @Get(':id/file')
+  @ApiOperation({ summary: 'Télécharger le fichier d\'un document' })
+  async serveFile(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, mimeType, filename } = await this.service.getFileBuffer(companyId, id);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
+    res.send(buffer);
   }
 
   @Patch(':id/link')
