@@ -601,10 +601,14 @@ export class JournalService {
       });
     }
 
-    // Grouper par (piece + date + libelle) → une écriture
+    // Grouper par (piece + date) si pièce renseignée, sinon (date + libelle)
+    // → fusionne les lignes débit/crédit même si leurs libellés diffèrent
     const grouped = new Map<string, CsvRow[]>();
     for (const row of rows) {
-      const key = `${row.piece}|${row.date}|${row.libelle}`;
+      const piece = row.piece?.trim();
+      const key   = piece
+        ? `REF:${piece}|${row.date}`
+        : `AUTO:${row.date}|${row.libelle}`;
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key)!.push(row);
     }
@@ -620,11 +624,26 @@ export class JournalService {
       // Vérifier que la date est dans l'exercice
       if (entryDate < fiscalYear.start_date || entryDate > fiscalYear.end_date) {
         skipped++;
+        errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — hors exercice, ignorée`);
         continue;
       }
 
       const totalDebit  = groupRows.reduce((s, r) => s + r.debit,  0);
       const totalCredit = groupRows.reduce((s, r) => s + r.credit, 0);
+
+      // Refuser les écritures avec moins de 2 lignes (comptes résolus)
+      if (groupRows.length < 2) {
+        skipped++;
+        errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — une seule ligne comptable, écriture ignorée (vérifiez les codes comptes)`);
+        continue;
+      }
+
+      // Refuser les écritures non équilibrées
+      if (Math.abs(totalDebit - totalCredit) > 0.01) {
+        skipped++;
+        errors.push(`Pièce "${first.piece || first.libelle}" du ${first.date} — déséquilibrée (débit ${totalDebit.toFixed(2)} ≠ crédit ${totalCredit.toFixed(2)}), ignorée`);
+        continue;
+      }
 
       await this.prisma.$transaction(async (tx) => {
         const entry = await tx.journalEntry.create({
@@ -634,7 +653,7 @@ export class JournalService {
             journal_type:   first.journal_type as any,
             entry_date:     entryDate,
             libelle:        first.libelle,
-            reference:      first.piece,
+            reference:      first.piece || null,
             total_debit:    totalDebit,
             total_credit:   totalCredit,
             status:         'brouillon',
@@ -647,7 +666,7 @@ export class JournalService {
             entry_id:   entry.id,
             company_id: companyId,
             account_id: resolveAccount(r.compte)!,
-            libelle:    r.tiers || r.libelle,
+            libelle:    r.tiers || r.libelle || null,
             debit:      r.debit,
             credit:     r.credit,
             line_order: idx + 1,
@@ -660,6 +679,36 @@ export class JournalService {
 
     this.logger.log(`Import CSV: ${created} écritures créées, ${skipped} ignorées, ${errors.length} erreurs`);
     return { created, skipped, errors };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  NETTOYAGE — supprimer les brouillons déséquilibrés
+  //  (écritures avec total_debit ≠ total_credit ou < 2 lignes)
+  // ══════════════════════════════════════════════════════════
+  async deleteUnbalancedDrafts(companyId: string): Promise<{ deleted: number }> {
+    // Récupérer tous les brouillons avec leurs lignes
+    const drafts = await this.prisma.journalEntry.findMany({
+      where:   { company_id: companyId, status: 'brouillon' },
+      include: { lines: { select: { id: true } } },
+    });
+
+    const unbalancedIds = drafts
+      .filter((e) => {
+        const lineCount = e.lines.length;
+        const diff      = Math.abs(Number(e.total_debit) - Number(e.total_credit));
+        return lineCount < 2 || diff > 0.01;
+      })
+      .map((e) => e.id);
+
+    if (unbalancedIds.length === 0) return { deleted: 0 };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalLine.deleteMany({ where: { entry_id: { in: unbalancedIds } } });
+      await tx.journalEntry.deleteMany({ where: { id:       { in: unbalancedIds } } });
+    });
+
+    this.logger.log(`Nettoyage : ${unbalancedIds.length} brouillon(s) déséquilibré(s) supprimé(s)`);
+    return { deleted: unbalancedIds.length };
   }
 
   // ── Vérification accès exercice ───────────────────────────

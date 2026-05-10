@@ -124,6 +124,14 @@ export class JournalController {
     return this.service.importCsv(companyId, userId, file.buffer);
   }
 
+  // DELETE /companies/:companyId/entries/unbalanced-drafts
+  @Delete('entries/unbalanced-drafts')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer tous les brouillons déséquilibrés (< 2 lignes ou débit ≠ crédit)' })
+  deleteUnbalancedDrafts(@Param('companyId') companyId: string) {
+    return this.service.deleteUnbalancedDrafts(companyId);
+  }
+
   // POST /companies/:companyId/entries/:entryId/reverse
   @Post('entries/:entryId/reverse')
   @HttpCode(HttpStatus.OK)
