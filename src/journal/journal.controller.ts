@@ -86,6 +86,14 @@ export class JournalController {
     return this.service.updateEntry(entryId, companyId, userId, dto);
   }
 
+  // DELETE /companies/:companyId/entries/unbalanced-drafts  ← STATIC avant :entryId
+  @Delete('entries/unbalanced-drafts')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer tous les brouillons déséquilibrés (< 2 lignes ou débit ≠ crédit)' })
+  deleteUnbalancedDrafts(@Param('companyId') companyId: string) {
+    return this.service.deleteUnbalancedDrafts(companyId);
+  }
+
   // DELETE /companies/:companyId/entries/:entryId
   @Delete('entries/:entryId')
   @HttpCode(HttpStatus.OK)
@@ -122,14 +130,6 @@ export class JournalController {
   ) {
     if (!file) throw new BadRequestException('Aucun fichier fourni');
     return this.service.importCsv(companyId, userId, file.buffer);
-  }
-
-  // DELETE /companies/:companyId/entries/unbalanced-drafts
-  @Delete('entries/unbalanced-drafts')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Supprimer tous les brouillons déséquilibrés (< 2 lignes ou débit ≠ crédit)' })
-  deleteUnbalancedDrafts(@Param('companyId') companyId: string) {
-    return this.service.deleteUnbalancedDrafts(companyId);
   }
 
   // POST /companies/:companyId/entries/:entryId/reverse
