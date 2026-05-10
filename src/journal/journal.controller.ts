@@ -1,6 +1,6 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Body, Param, Query, UseGuards, HttpCode, HttpStatus,
+  Controller, Get, Post, Patch, Delete, HttpCode, HttpStatus,
+  Body, Param, Query, UseGuards,
   UploadedFile, UseInterceptors, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -68,6 +68,17 @@ export class JournalController {
     @Body() dto: UpdateJournalEntryDto,
   ) {
     return this.service.updateEntry(entryId, companyId, userId, dto);
+  }
+
+  // DELETE /companies/:companyId/entries/:entryId
+  @Delete('entries/:entryId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer une écriture en brouillon' })
+  deleteEntry(
+    @Param('companyId') companyId: string,
+    @Param('entryId')   entryId: string,
+  ) {
+    return this.service.deleteEntry(entryId, companyId);
   }
 
   // POST /companies/:companyId/entries/:entryId/validate

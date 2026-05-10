@@ -280,6 +280,30 @@ export class JournalService {
   }
 
   // ══════════════════════════════════════════════════════════
+  //  SUPPRIMER UNE ÉCRITURE (brouillon uniquement)
+  // ══════════════════════════════════════════════════════════
+  async deleteEntry(entryId: string, companyId: string) {
+    const entry = await this.prisma.journalEntry.findFirst({
+      where: { id: entryId, company_id: companyId },
+    });
+    if (!entry) throw new NotFoundException('Écriture introuvable');
+    if (entry.status !== 'brouillon') {
+      throw new ForbiddenException(
+        'Seules les écritures en brouillon peuvent être supprimées. ' +
+        'Pour annuler une écriture validée, utilisez la contrepassation.',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalLine.deleteMany({ where: { entry_id: entryId } });
+      await tx.journalEntry.delete({ where: { id: entryId } });
+    });
+
+    this.logger.log(`Écriture supprimée : ${entryId}`);
+    return { message: 'Écriture supprimée' };
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  VALIDER UNE ÉCRITURE (brouillon → validée)
   // ══════════════════════════════════════════════════════════
   async validateEntry(entryId: string, companyId: string, userId: string) {
