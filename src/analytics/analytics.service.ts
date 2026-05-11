@@ -58,11 +58,59 @@ export class AnalyticsService {
   // ── Balance générale ─────────────────────────────────────
   async getBalance(companyId: string, fiscalYearId: string) {
     const balances = await this.getBalances(companyId, fiscalYearId);
+    const sorted   = [...balances].sort((a, b) => a.account_code.localeCompare(b.account_code));
     return {
-      comptes: balances,
+      comptes:      sorted,
       total_debit:  balances.reduce((s, b) => s + b.debit_total, 0),
       total_credit: balances.reduce((s, b) => s + b.credit_total, 0),
     };
+  }
+
+  // ── Export FEC (Fichier des Écritures Comptables — norme DGFiP France) ─
+  async exportFec(companyId: string, fiscalYearId: string): Promise<string> {
+    const lines = await this.prisma.journalLine.findMany({
+      where: {
+        company_id: companyId,
+        entry: { fiscal_year_id: fiscalYearId, status: 'validee' },
+      },
+      include: {
+        account: { select: { code: true, label: true } },
+        entry:   { select: { id: true, entry_date: true, reference: true, libelle: true, journal_type: true } },
+      },
+      orderBy: [{ entry: { entry_date: 'asc' } }, { line_order: 'asc' }],
+    });
+
+    const JOURNAL_LABELS: Record<string, string> = {
+      achats: 'Journal des achats', ventes: 'Journal des ventes',
+      banque: 'Journal de banque',  caisse: 'Journal de caisse',
+      od:     'Opérations diverses', salaires: 'Journal des salaires',
+      actif:  "Journal d'actif",
+    };
+
+    const header = [
+      'JournalCode', 'JournalLib', 'EcritureNum', 'EcritureDate',
+      'CompteNum', 'CompteLib', 'CompAuxNum', 'CompAuxLib',
+      'PieceRef', 'PieceDate', 'EcritureLib',
+      'Debit', 'Credit', 'EcritureLet', 'DateLet', 'ValidDate',
+    ].join('\t');
+
+    const rows = lines.map(l => [
+      l.entry.journal_type,
+      JOURNAL_LABELS[l.entry.journal_type] ?? l.entry.journal_type,
+      l.entry.entry_number ?? '',
+      l.entry.entry_date.toISOString().slice(0, 10).replace(/-/g, ''),
+      l.account.code,
+      l.account.label,
+      '', '',
+      l.entry.reference ?? l.entry.id.slice(0, 8).toUpperCase(),
+      l.entry.entry_date.toISOString().slice(0, 10).replace(/-/g, ''),
+      l.libelle ?? l.entry.libelle,
+      Number(l.debit).toFixed(2).replace('.', ','),
+      Number(l.credit).toFixed(2).replace('.', ','),
+      '', '', '',
+    ].join('\t'));
+
+    return [header, ...rows].join('\r\n');
   }
 
   // ── Grand livre ───────────────────────────────────────────

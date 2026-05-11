@@ -1,6 +1,7 @@
 import {
-  Controller, Get, Param, Query, UseGuards,
+  Controller, Get, Param, Query, UseGuards, Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService }   from './analytics.service';
 import { JwtAuthGuard }       from '../common/guards/jwt-auth.guard';
@@ -66,5 +67,19 @@ export class AnalyticsController {
     @Query('account_code') accountCode?: string,
   ) {
     return this.service.getGrandLivre(companyId, fiscalYearId, accountCode);
+  }
+
+  @Get('export-fec')
+  @ApiOperation({ summary: 'Export FEC (Fichier des Écritures Comptables — norme DGFiP France)' })
+  async exportFec(
+    @Param('companyId')      companyId: string,
+    @Query('fiscal_year_id') fiscalYearId: string,
+    @Res() res: Response,
+  ) {
+    const fec      = await this.service.exportFec(companyId, fiscalYearId);
+    const filename = `FEC_${companyId.slice(0, 8)}_${new Date().toISOString().slice(0, 10)}.txt`;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(fec);
   }
 }
