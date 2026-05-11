@@ -359,28 +359,37 @@ export class AnalyticsService {
     };
   }
 
-  // ── Compte de résultat OHADA ──────────────────────────────
+  // ── Compte de résultat ───────────────────────────────────
   async getCompteResultat(companyId: string, fiscalYearId: string) {
     const balances = await this.getBalances(companyId, fiscalYearId);
     const solde = (prefix: string) => Math.abs(this.sumByPrefix(balances, prefix));
 
-    // Produits
-    const ca        = solde('70') + solde('71') + solde('72');
-    const subvExpl  = solde('74');
-    const autresProd = solde('75') + solde('77') + solde('79');
-    const prodFin   = solde('76');
-    const totalProduits = ca + subvExpl + autresProd + prodFin;
+    // ── Produits (classe 7 complète) ─────────────────────────
+    const ca           = solde('70') + solde('71') + solde('72');
+    const subvExpl     = solde('74');
+    const autresProd   = solde('73') + solde('75') + solde('77') + solde('78') + solde('79');
+    const prodFin      = solde('76');
+    const totalProduitsEnum = ca + subvExpl + autresProd + prodFin;
+    // Catch-all: tout ce qui est en classe 7 mais non capturé ci-dessus
+    const totalProduits7 = Math.abs(this.sumByPrefix(balances, '7'));
+    const autresProdCatchAll = Math.max(0, totalProduits7 - totalProduitsEnum);
+    const totalProduits = totalProduits7; // on utilise la vraie somme classe 7
 
-    // Charges
+    // ── Charges (classe 6 complète) ──────────────────────────
     const achats         = solde('60') + solde('61');
     const servicesExt    = solde('62');
     const impotsTaxes    = solde('63');
     const chargesPers    = solde('64');
-    const autresCharges  = solde('65');
+    const autresGestion  = solde('65');
     const chargesFin     = solde('66');
+    const chargesExcept  = solde('67'); // Charges exceptionnelles (ex: 674 Charges sociales)
     const dotations      = solde('68');
-    const impotResultat  = solde('89');
-    const totalCharges   = achats + servicesExt + impotsTaxes + chargesPers + autresCharges + chargesFin + dotations + impotResultat;
+    const impotResultat  = solde('69') + solde('89');
+    const totalChargesEnum = achats + servicesExt + impotsTaxes + chargesPers + autresGestion + chargesFin + chargesExcept + dotations + impotResultat;
+    // Catch-all: tout ce qui est en classe 6 mais non capturé ci-dessus
+    const totalCharges6 = this.sumByPrefix(balances, '6');
+    const autresChargesCatchAll = Math.max(0, totalCharges6 - totalChargesEnum);
+    const totalCharges = totalCharges6; // on utilise la vraie somme classe 6
 
     const resultatNet = totalProduits - totalCharges;
 
@@ -388,7 +397,7 @@ export class AnalyticsService {
       produits: {
         chiffre_affaires:    ca,
         subventions_expl:    subvExpl,
-        autres_produits:     autresProd,
+        autres_produits:     autresProd + autresProdCatchAll,
         produits_financiers: prodFin,
         total_produits:      totalProduits,
       },
@@ -397,7 +406,7 @@ export class AnalyticsService {
         services_exterieurs:      servicesExt,
         impots_taxes:             impotsTaxes,
         charges_personnel:        chargesPers,
-        autres_charges:           autresCharges,
+        autres_charges:           autresGestion + chargesExcept + autresChargesCatchAll,
         charges_financieres:      chargesFin,
         dotations_amortissements: dotations,
         impot_sur_resultat:       impotResultat,
@@ -405,7 +414,8 @@ export class AnalyticsService {
       },
       resultat_net:    resultatNet,
       nature:          resultatNet >= 0 ? 'benefice' : 'perte',
-      marge_brute:     ca > 0 ? Math.round((resultatNet / ca) * 10000) / 100 : 0,
+      nature_resultat: resultatNet >= 0 ? 'benefice' : 'perte',
+      marge_brute:     totalProduits > 0 ? Math.round((resultatNet / totalProduits) * 10000) / 100 : 0,
     };
   }
 }
