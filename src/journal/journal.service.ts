@@ -691,6 +691,46 @@ export class JournalService {
   }
 
   // ══════════════════════════════════════════════════════════
+  //  REMISE À ZÉRO TOTALE — supprime TOUTES les écritures (brouillon + validées)
+  // ══════════════════════════════════════════════════════════
+  async deleteAllEntries(companyId: string): Promise<{ deleted: number }> {
+    const entries = await this.prisma.journalEntry.findMany({
+      where:  { company_id: companyId },
+      select: { id: true },
+    });
+    const ids = entries.map((e) => e.id);
+    if (ids.length === 0) return { deleted: 0 };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalLine.deleteMany({ where: { entry_id: { in: ids } } });
+      await tx.journalEntry.deleteMany({ where: { id:       { in: ids } } });
+    });
+
+    this.logger.warn(`REMISE À ZÉRO TOTALE : ${ids.length} écriture(s) supprimée(s) pour ${companyId}`);
+    return { deleted: ids.length };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  SUPPRESSION TOTALE — supprimer TOUS les brouillons
+  // ══════════════════════════════════════════════════════════
+  async deleteAllDrafts(companyId: string): Promise<{ deleted: number }> {
+    const drafts = await this.prisma.journalEntry.findMany({
+      where:  { company_id: companyId, status: 'brouillon' },
+      select: { id: true },
+    });
+    const ids = drafts.map((e) => e.id);
+    if (ids.length === 0) return { deleted: 0 };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.journalLine.deleteMany({ where: { entry_id: { in: ids } } });
+      await tx.journalEntry.deleteMany({ where: { id:       { in: ids } } });
+    });
+
+    this.logger.log(`Suppression totale : ${ids.length} brouillon(s) supprimé(s) pour ${companyId}`);
+    return { deleted: ids.length };
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  NETTOYAGE — supprimer les brouillons déséquilibrés
   //  (écritures avec total_debit ≠ total_credit ou < 2 lignes)
   // ══════════════════════════════════════════════════════════

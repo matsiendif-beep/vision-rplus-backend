@@ -86,6 +86,22 @@ export class JournalController {
     return this.service.updateEntry(entryId, companyId, userId, dto);
   }
 
+  // DELETE /companies/:companyId/entries/all-entries  ← STATIC avant :entryId
+  @Delete('entries/all-entries')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer TOUTES les écritures (brouillons + validées) — remise à zéro complète' })
+  deleteAllEntries(@Param('companyId') companyId: string) {
+    return this.service.deleteAllEntries(companyId);
+  }
+
+  // DELETE /companies/:companyId/entries/all-drafts  ← STATIC avant :entryId
+  @Delete('entries/all-drafts')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Supprimer TOUS les brouillons (remise à zéro du journal)' })
+  deleteAllDrafts(@Param('companyId') companyId: string) {
+    return this.service.deleteAllDrafts(companyId);
+  }
+
   // DELETE /companies/:companyId/entries/unbalanced-drafts  ← STATIC avant :entryId
   @Delete('entries/unbalanced-drafts')
   @HttpCode(HttpStatus.OK)
