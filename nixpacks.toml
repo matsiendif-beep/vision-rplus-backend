@@ -1,14 +1,2 @@
-[phases.setup]
-nixPkgs = ["nodejs_20", "openssl"]
-
-[phases.install]
-cmds = ["npm ci --include=dev"]
-
 [phases.build]
-cmds = [
-  "npx prisma generate",
-  "./node_modules/.bin/nest build"
-]
-
-[start]
-cmd = "node dist/src/main"
+cmds = ["npm run build", "npx prisma generate"]
