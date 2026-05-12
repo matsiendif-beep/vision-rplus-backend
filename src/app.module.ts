@@ -12,6 +12,7 @@ import { AnalyticsModule }   from './analytics/analytics.module';
 import { BankModule }        from './bank/bank.module';
 import { SyncModule }        from './sync/sync.module';
 import { SeedModule }        from './seed/seed.module';
+import { SocialModule }      from './social/social.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SeedModule }        from './seed/seed.module';
     AnalyticsModule,     // KPIs, balance, grand livre
     BankModule,          // Comptes bancaires & rapprochement
     SyncModule,          // Synchronisation offline mobile
+    SocialModule,        // Webhooks réseaux sociaux (ManyChat, Meta)
   ],
 })
 export class AppModule {}

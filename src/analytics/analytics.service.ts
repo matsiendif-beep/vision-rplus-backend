@@ -94,10 +94,20 @@ export class AnalyticsService {
       'Debit', 'Credit', 'EcritureLet', 'DateLet', 'ValidDate',
     ].join('\t');
 
+    const journalCounters: Record<string, number> = {};
+    const entryNums: Record<string, string> = {};
+    for (const l of lines) {
+      if (!entryNums[l.entry.id]) {
+        const j = l.entry.journal_type.toUpperCase();
+        journalCounters[j] = (journalCounters[j] ?? 0) + 1;
+        entryNums[l.entry.id] = `${j}${String(journalCounters[j]).padStart(6, '0')}`;
+      }
+    }
+
     const rows = lines.map(l => [
       l.entry.journal_type,
       JOURNAL_LABELS[l.entry.journal_type] ?? l.entry.journal_type,
-      l.entry.entry_number ?? '',
+      entryNums[l.entry.id],
       l.entry.entry_date.toISOString().slice(0, 10).replace(/-/g, ''),
       l.account.code,
       l.account.label,
