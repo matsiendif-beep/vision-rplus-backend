@@ -33,21 +33,25 @@ Règles :
     const quickReplies = this.getQuickReply(intent, firstName);
     if (quickReplies) return quickReplies;
 
-    const response = await this.client.messages.create({
-      model:      'claude-haiku-4-5-20251001', // Modèle rapide pour les webhooks
-      max_tokens: 250,
-      system:     this.SYSTEM_PROMPT,
-      messages: [{
-        role:    'user',
-        content: `Prénom de l'utilisateur : ${firstName}
+    try {
+      const response = await this.client.messages.create({
+        model:      'claude-haiku-4-5-20251001', // Modèle rapide pour les webhooks
+        max_tokens: 250,
+        system:     this.SYSTEM_PROMPT,
+        messages: [{
+          role:    'user',
+          content: `Prénom de l'utilisateur : ${firstName}
 Message reçu : "${message}"
 ${intent ? `Intention détectée : ${intent}` : ''}
 
 Génère UNE réponse courte et engageante (2-4 phrases max).`,
-      }],
-    });
-
-    return response.content[0].type === 'text' ? response.content[0].text : this.fallbackReply(firstName);
+        }],
+      });
+      return response.content[0].type === 'text' ? response.content[0].text : this.fallbackReply(firstName);
+    } catch (err) {
+      this.logger.warn(`Claude API indisponible, réponse fallback envoyée: ${err?.message}`);
+      return this.fallbackReply(firstName);
+    }
   }
 
   // ── Réponses rapides par intent ───────────────────────────────
