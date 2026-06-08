@@ -13,6 +13,7 @@ import { BankModule }        from './bank/bank.module';
 import { SyncModule }        from './sync/sync.module';
 import { SeedModule }        from './seed/seed.module';
 import { SocialModule }      from './social/social.module';
+import { LegalModule }       from './legal/legal.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SocialModule }      from './social/social.module';
     BankModule,          // Comptes bancaires & rapprochement
     SyncModule,          // Synchronisation offline mobile
     SocialModule,        // Webhooks réseaux sociaux (ManyChat, Meta)
+    LegalModule,         // Pages légales (politique de confidentialité)
   ],
 })
 export class AppModule {}
