@@ -16,7 +16,7 @@ professionnelle et commerciale. Tu dois aider, convertir en essai, et orienter v
 Règles :
 - Réponds en 2-4 phrases maximum (c'est un DM, pas un email)
 - Sois chaleureux et personnel (utilise le prénom si disponible)
-- Si la personne est intéressée → donne le lien : vision-rplus-frontend.vercel.app
+- Si la personne est intéressée → donne le lien : www.visionrplus.com
 - Si c'est une question technique → réponds brièvement et propose un essai gratuit
 - Si c'est une plainte ou un problème → empathie + solution immédiate
 - Si tu ne sais pas → dis-le honnêtement et propose de contacter l'équipe
@@ -60,13 +60,13 @@ Génère UNE réponse courte et engageante (2-4 phrases max).`,
     const name = firstName ?? 'ami(e)';
 
     const replies: Record<string, string> = {
-      'prix':        `Bonjour ${name} ! Vision R+ est conçu pour être accessible aux PME. Crée ton compte gratuitement sur vision-rplus-frontend.vercel.app et découvre toutes les fonctionnalités. Si tu as des questions sur les tarifs, envoie-nous un message direct 😊`,
-      'essai':       `Super ${name} ! Tu peux commencer tout de suite sur vision-rplus-frontend.vercel.app — aucune carte bancaire requise pour commencer. Crée ton premier exercice comptable en 2 minutes !`,
-      'demo':        `Bonjour ${name} ! Pour une démo personnalisée de Vision R+, tu peux tester directement sur vision-rplus-frontend.vercel.app. Toutes les fonctionnalités (journal, bilan, compte de résultat, FEC) sont accessibles. Dis-nous si tu as des questions ! 🎯`,
-      'ohada':       `Bonjour ${name} ! Vision R+ supporte à la fois PCG France et OHADA — tu peux gérer des entreprises françaises ET africaines dans le même logiciel. Essaie ici : vision-rplus-frontend.vercel.app 🌍`,
-      'aide':        `Bonjour ${name} ! On est là pour t'aider 😊 Décris-nous ta situation et on te guide pas à pas. Tu peux aussi tester Vision R+ directement sur vision-rplus-frontend.vercel.app — l'interface est simple et intuitive !`,
+      'prix':        `Bonjour ${name} ! Vision R+ est conçu pour être accessible aux PME. Crée ton compte gratuitement sur www.visionrplus.com et découvre toutes les fonctionnalités. Si tu as des questions sur les tarifs, envoie-nous un message direct 😊`,
+      'essai':       `Super ${name} ! Tu peux commencer tout de suite sur www.visionrplus.com — aucune carte bancaire requise pour commencer. Crée ton premier exercice comptable en 2 minutes !`,
+      'demo':        `Bonjour ${name} ! Pour une démo personnalisée de Vision R+, tu peux tester directement sur www.visionrplus.com. Toutes les fonctionnalités (journal, bilan, compte de résultat, FEC) sont accessibles. Dis-nous si tu as des questions ! 🎯`,
+      'ohada':       `Bonjour ${name} ! Vision R+ supporte à la fois PCG France et OHADA — tu peux gérer des entreprises françaises ET africaines dans le même logiciel. Essaie ici : www.visionrplus.com 🌍`,
+      'aide':        `Bonjour ${name} ! On est là pour t'aider 😊 Décris-nous ta situation et on te guide pas à pas. Tu peux aussi tester Vision R+ directement sur www.visionrplus.com — l'interface est simple et intuitive !`,
       'merci':       `Merci à toi ${name} ! 🙏 Si Vision R+ t'a aidé, n'hésite pas à en parler autour de toi — chaque entrepreneur mérite une compta claire. À bientôt !`,
-      'inscription': `Parfait ${name} ! Pour créer ton compte Vision R+, va sur vision-rplus-frontend.vercel.app → "Créer un compte". C'est rapide et tu peux commencer à saisir tes écritures de suite. Bienvenue dans la famille Vision R+ 🎉`,
+      'inscription': `Parfait ${name} ! Pour créer ton compte Vision R+, va sur www.visionrplus.com → "Créer un compte". C'est rapide et tu peux commencer à saisir tes écritures de suite. Bienvenue dans la famille Vision R+ 🎉`,
     };
 
     return replies[intent ?? ''] ?? null;
@@ -121,6 +121,6 @@ Génère UNE réponse courte et engageante (2-4 phrases max).`,
   }
 
   private fallbackReply(firstName: string): string {
-    return `Bonjour ${firstName} ! Merci pour ton message 😊 Notre équipe Vision R+ te répond très bientôt. En attendant, tu peux explorer le logiciel sur vision-rplus-frontend.vercel.app !`;
+    return `Bonjour ${firstName} ! Merci pour ton message 😊 Notre équipe Vision R+ te répond très bientôt. En attendant, tu peux explorer le logiciel sur www.visionrplus.com !`;
   }
 }

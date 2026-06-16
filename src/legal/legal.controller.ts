@@ -66,7 +66,7 @@ export class LegalController {
   <p>Pour toute question relative à cette politique :<br>
   <strong>Vision R+</strong><br>
   Email : fredericmatsiendi@gmail.com<br>
-  Site : <a href="https://vision-rplus-frontend.vercel.app">vision-rplus-frontend.vercel.app</a></p>
+  Site : <a href="https://www.visionrplus.com">www.visionrplus.com</a></p>
 </body>
 </html>`;
   }
