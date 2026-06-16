@@ -14,6 +14,7 @@ import { SyncModule }        from './sync/sync.module';
 import { SeedModule }        from './seed/seed.module';
 import { SocialModule }      from './social/social.module';
 import { LegalModule }       from './legal/legal.module';
+import { BillingModule }     from './billing/billing.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { LegalModule }       from './legal/legal.module';
     SyncModule,          // Synchronisation offline mobile
     SocialModule,        // Webhooks réseaux sociaux (ManyChat, Meta)
     LegalModule,         // Pages légales (politique de confidentialité)
+    BillingModule,       // Abonnements & paiements Stripe
   ],
 })
 export class AppModule {}
