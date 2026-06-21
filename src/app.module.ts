@@ -15,6 +15,7 @@ import { SeedModule }        from './seed/seed.module';
 import { SocialModule }      from './social/social.module';
 import { LegalModule }       from './legal/legal.module';
 import { BillingModule }     from './billing/billing.module';
+import { WhatsAppModule }    from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { BillingModule }     from './billing/billing.module';
     SocialModule,        // Webhooks réseaux sociaux (ManyChat, Meta)
     LegalModule,         // Pages légales (politique de confidentialité)
     BillingModule,       // Abonnements & paiements Stripe
+    WhatsAppModule,      // Notifications + assistant IA WhatsApp
   ],
 })
 export class AppModule {}
