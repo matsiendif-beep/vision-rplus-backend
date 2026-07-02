@@ -4,7 +4,13 @@ import Anthropic from '@anthropic-ai/sdk';
 @Injectable()
 export class SocialService {
   private readonly logger = new Logger(SocialService.name);
-  private readonly client  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  private readonly client: Anthropic | null;
+
+  constructor() {
+    const key = process.env.ANTHROPIC_API_KEY;
+    this.client = key ? new Anthropic({ apiKey: key }) : null;
+    if (!key) this.logger.warn('ANTHROPIC_API_KEY non défini — réponses IA désactivées');
+  }
 
   // ── Prompt système commun ─────────────────────────────────────
   private readonly SYSTEM_PROMPT = `Tu es l'assistant commercial de Vision R+, un logiciel de comptabilité SaaS
@@ -33,6 +39,7 @@ Règles :
     const quickReplies = this.getQuickReply(intent, firstName);
     if (quickReplies) return quickReplies;
 
+    if (!this.client) return this.fallbackReply(firstName);
     try {
       const response = await this.client.messages.create({
         model:      'claude-haiku-4-5-20251001', // Modèle rapide pour les webhooks
