@@ -10,9 +10,18 @@ const PLAN_PRICES: Record<string, string> = {
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
-  private readonly stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '');
+  private readonly stripe: InstanceType<typeof Stripe> | null;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    this.stripe = key ? new Stripe(key) : null;
+    if (!key) this.logger.warn('STRIPE_SECRET_KEY non défini — paiements Stripe désactivés');
+  }
+
+  private get stripeClient(): InstanceType<typeof Stripe> {
+    if (!this.stripe) throw new BadRequestException('Paiement Stripe non configuré. Contactez le support.');
+    return this.stripe;
+  }
 
   // ── Créer une session de paiement Stripe Checkout ────────────
   async createCheckoutSession(userId: string, plan: 'pro' | 'cabinet'): Promise<{ url: string }> {
@@ -27,7 +36,7 @@ export class BillingService {
       `${user.first_name} ${user.last_name}`,
     );
 
-    const session = await this.stripe.checkout.sessions.create({
+    const session = await this.stripeClient.checkout.sessions.create({
       customer:   customerId,
       mode:       'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
@@ -54,7 +63,7 @@ export class BillingService {
       throw new BadRequestException('Aucun abonnement actif trouvé');
     }
 
-    const session = await this.stripe.billingPortal.sessions.create({
+    const session = await this.stripeClient.billingPortal.sessions.create({
       customer:   sub.stripe_customer_id,
       return_url: `${process.env.FRONTEND_URL}/dashboard`,
     });
@@ -82,7 +91,7 @@ export class BillingService {
     let event: any;
 
     try {
-      event = this.stripe.webhooks.constructEvent(
+      event = this.stripeClient.webhooks.constructEvent(
         payload,
         signature,
         process.env.STRIPE_WEBHOOK_SECRET ?? '',
@@ -113,7 +122,7 @@ export class BillingService {
     const plan   = session.metadata?.plan   as 'pro' | 'cabinet' | undefined;
     if (!userId || !plan) return;
 
-    const stripeSub = await this.stripe.subscriptions.retrieve(session.subscription as string);
+    const stripeSub = await this.stripeClient.subscriptions.retrieve(session.subscription as string);
     const sub = stripeSub as any;
 
     await this.prisma.$transaction([
@@ -206,7 +215,7 @@ export class BillingService {
 
     if (existing?.stripe_customer_id) return existing.stripe_customer_id;
 
-    const customer = await this.stripe.customers.create({ email, name, metadata: { userId } });
+    const customer = await this.stripeClient.customers.create({ email, name, metadata: { userId } });
     return customer.id;
   }
 
