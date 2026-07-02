@@ -68,4 +68,20 @@ export class WhatsAppController {
     await this.wa.notifyFinancialAlert(userId, 'custom', body.message);
     return { message: 'Notification envoyée' };
   }
+
+  // ══════════════════════════════════════════════════════════════
+  //  TWILIO — Alternative sans vérification Meta
+  //  Configurer dans Twilio Console > Messaging > WhatsApp Sandbox:
+  //    Webhook URL: {BACKEND_URL}/whatsapp/twilio/webhook
+  //    Méthode: HTTP POST
+  // ══════════════════════════════════════════════════════════════
+
+  @Post('twilio/webhook')
+  @HttpCode(200)
+  async twilioWebhook(@Body() body: any) {
+    this.logger.log(`[Twilio] Webhook reçu de ${body.From ?? 'inconnu'}`);
+    await this.wa.handleTwilioInbound(body);
+    // Twilio attend une réponse TwiML ou vide (200 suffit)
+    return '';
+  }
 }

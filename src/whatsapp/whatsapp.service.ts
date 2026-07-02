@@ -4,6 +4,7 @@ import { WhatsAppAssistant }  from './whatsapp-assistant.service';
 
 const WA_API_VERSION = 'v21.0';
 const WA_BASE        = `https://graph.facebook.com/${WA_API_VERSION}`;
+const TWILIO_BASE    = 'https://api.twilio.com/2010-04-01';
 
 @Injectable()
 export class WhatsAppService {
@@ -270,5 +271,93 @@ export class WhatsAppService {
   private normalizePhone(phone: string): string {
     // Normalise vers format E.164 international sans +
     return phone.replace(/\D/g, '');
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  TWILIO — Alternative WhatsApp Business API (sans vérification Meta)
+  //  Env vars: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
+  //  Webhook URL à configurer dans Twilio Console:
+  //    POST {BACKEND_URL}/whatsapp/twilio/webhook
+  // ══════════════════════════════════════════════════════════════
+
+  async handleTwilioInbound(body: any): Promise<void> {
+    // Twilio envoie application/x-www-form-urlencoded
+    const from    = (body.From ?? '').replace('whatsapp:', '');  // retire le préfixe
+    const text    = body.Body ?? '';
+    const msgSid  = body.MessageSid ?? '';
+
+    if (!from || !text) return;
+    this.logger.log(`[Twilio] Message reçu de ${from}: "${text.slice(0, 60)}"`);
+
+    await this.processUserMessageViaTwilio(from, text, msgSid);
+  }
+
+  private async processUserMessageViaTwilio(
+    phoneNumber: string,
+    text:        string,
+    msgSid:      string,
+  ): Promise<void> {
+    const normalized = this.normalizePhone(phoneNumber);
+
+    let session = await this.prisma.whatsAppSession.findUnique({
+      where:   { phone_number: normalized },
+      include: { user: true, company: true },
+    });
+
+    if (!session) {
+      await this.sendViaTwilio(phoneNumber,
+        '👋 *Bienvenue sur Vision R+!*\n\n' +
+        'Je suis ton assistant comptable IA. Connecte-toi sur *visionrplus.com > Paramètres > WhatsApp* pour lier ton numéro.\n\n' +
+        'Pas encore de compte ? → www.visionrplus.com 🚀',
+      );
+      return;
+    }
+
+    await this.prisma.whatsAppMessage.create({
+      data: { session_id: session.id, direction: 'inbound', content: text, wa_message_id: msgSid },
+    });
+    await this.prisma.whatsAppSession.update({
+      where: { id: session.id },
+      data:  { last_message_at: new Date() },
+    });
+
+    const reply = await this.assistant.generateReply(session, text);
+
+    await this.prisma.whatsAppMessage.create({
+      data: { session_id: session.id, direction: 'outbound', content: reply },
+    });
+    await this.sendViaTwilio(phoneNumber, reply);
+  }
+
+  async sendViaTwilio(to: string, text: string): Promise<void> {
+    const sid    = process.env.TWILIO_ACCOUNT_SID;
+    const token  = process.env.TWILIO_AUTH_TOKEN;
+    const from   = process.env.TWILIO_WHATSAPP_NUMBER; // ex: +14155238886 (sandbox) ou ton numéro pro
+
+    if (!sid || !token || !from) {
+      this.logger.warn('Twilio non configuré (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WHATSAPP_NUMBER manquants)');
+      return;
+    }
+
+    const toWa   = to.startsWith('whatsapp:') ? to : `whatsapp:${to.startsWith('+') ? to : '+' + to}`;
+    const fromWa = from.startsWith('whatsapp:') ? from : `whatsapp:${from}`;
+
+    const body = new URLSearchParams({ From: fromWa, To: toWa, Body: text });
+
+    const res = await fetch(`${TWILIO_BASE}/Accounts/${sid}/Messages.json`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64'),
+      },
+      body: body.toString(),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      this.logger.error('[Twilio] Erreur envoi message', JSON.stringify(err));
+    } else {
+      this.logger.log(`[Twilio] Message envoyé à ${to}`);
+    }
   }
 }
