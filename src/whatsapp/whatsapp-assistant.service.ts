@@ -5,11 +5,21 @@ import { PrismaService }      from '../prisma/prisma.service';
 @Injectable()
 export class WhatsAppAssistant {
   private readonly logger = new Logger(WhatsAppAssistant.name);
-  private readonly claude  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  private claude: Anthropic | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (key) {
+      this.claude = new Anthropic({ apiKey: key });
+    } else {
+      this.logger.warn('ANTHROPIC_API_KEY non défini — assistant IA WhatsApp désactivé');
+    }
+  }
 
   async generateReply(session: any, userMessage: string): Promise<string> {
+    if (!this.claude) {
+      return this.fallback(session.user?.first_name ?? 'utilisateur');
+    }
     try {
       // Charger le contexte financier de la company liée
       const context = session.company_id
@@ -35,7 +45,7 @@ export class WhatsAppAssistant {
       // Ajouter le message actuel
       messages.push({ role: 'user', content: userMessage });
 
-      const response = await this.claude.messages.create({
+      const response = await this.claude!.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 400,
         system:     systemPrompt,
