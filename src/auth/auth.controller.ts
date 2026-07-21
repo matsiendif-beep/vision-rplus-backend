@@ -1,12 +1,12 @@
 // ── auth/auth.controller.ts ───────────────────────────────────
 import {
-  Controller, Post, Get, Patch, Body,
+  Controller, Post, Get, Patch, Body, Param,
   UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { IsString, MinLength } from 'class-validator';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthService }   from './auth.service';
-import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, InviteClientDto, AcceptInviteDto } from './dto/auth.dto';
 import { JwtAuthGuard }  from '../common/guards/jwt-auth.guard';
 import { GetUser }       from '../common/decorators';
 
@@ -51,5 +51,29 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(userId, dto.current_password, dto.new_password);
+  }
+
+  @Post('invite')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Générer un QR code d\'invitation pour un client' })
+  generateInvite(
+    @GetUser('id') userId: string,
+    @Body() dto: InviteClientDto,
+  ) {
+    return this.authService.generateClientInvite(userId, dto);
+  }
+
+  @Get('invite/:token')
+  @ApiOperation({ summary: 'Valider un token d\'invitation' })
+  validateInvite(@Param('token') token: string) {
+    return this.authService.validateInviteToken(token);
+  }
+
+  @Post('accept-invite')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accepter une invitation et créer son compte' })
+  acceptInvite(@Body() dto: AcceptInviteDto) {
+    return this.authService.acceptInvite(dto);
   }
 }

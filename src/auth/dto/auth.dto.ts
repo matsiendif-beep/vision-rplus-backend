@@ -46,3 +46,39 @@ export class LoginDto {
   @IsString()
   password: string;
 }
+
+export class InviteClientDto {
+  @ApiProperty({ example: 'uuid-company-id' })
+  @IsString()
+  company_id: string;
+
+  @ApiProperty({ example: 'lecture', enum: ['admin', 'comptable', 'lecture'] })
+  @IsOptional()
+  @IsString()
+  role?: string;
+}
+
+export class AcceptInviteDto {
+  @ApiProperty()
+  @IsString()
+  token: string;
+
+  @ApiProperty()
+  @IsEmail()
+  email: string;
+
+  @ApiProperty({ minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  password: string;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(100)
+  first_name: string;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(100)
+  last_name: string;
+}
