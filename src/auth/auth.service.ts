@@ -24,7 +24,7 @@ export class AuthService {
   async register(dto: RegisterDto) {
     // Vérifier si l'email est déjà utilisé
     const exists = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
+      where: { email: dto.email.trim().toLowerCase() },
     });
     if (exists) {
       throw new ConflictException('Un compte existe déjà avec cet email');
@@ -35,11 +35,12 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
-        email:         dto.email.toLowerCase(),
+        email:         dto.email.trim().toLowerCase(),
         password_hash: hash,
-        first_name:    dto.first_name,
-        last_name:     dto.last_name,
-        phone:         dto.phone,
+        // Les claviers mobiles ajoutent souvent un espace final
+        first_name:    dto.first_name.trim(),
+        last_name:     dto.last_name.trim(),
+        phone:         dto.phone?.trim(),
       },
       select: {
         id:         true,
@@ -61,7 +62,7 @@ export class AuthService {
   // ── Connexion ──────────────────────────────────────────────
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
+      where: { email: dto.email.trim().toLowerCase() },
     });
 
     if (!user || !user.is_active) {

@@ -163,7 +163,7 @@ export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
 
     const appUrl = (process.env.APP_URL ?? 'https://www.visionrplus.com').replace(/\/$/, '');
     const ctx: T.TemplateContext = {
-      firstName:      user.first_name || 'et bienvenue',
+      firstName:      user.first_name?.trim() || 'et bienvenue',
       appUrl,
       bookingUrl:     process.env.DEMO_BOOKING_URL || undefined,
       unsubscribeUrl: `${appUrl}/api/v1/email/unsubscribe?u=${user.id}&t=${this.unsubscribeToken(user.id)}`,
