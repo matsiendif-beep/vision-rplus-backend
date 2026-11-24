@@ -33,6 +33,13 @@ export class CompaniesController {
     return this.service.create(userId, dto);
   }
 
+  // POST /companies/demo
+  @Post('demo')
+  @ApiOperation({ summary: 'Créer (ou récupérer) l\'entreprise de démonstration' })
+  createDemo(@GetUser('id') userId: string) {
+    return this.service.createDemo(userId);
+  }
+
   // GET /companies
   @Get()
   @ApiOperation({ summary: 'Lister toutes les entreprises de l\'utilisateur' })

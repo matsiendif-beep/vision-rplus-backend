@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
 import { PrismaService } from '../prisma/prisma.service';
+import { OnboardingEmailsService } from '../email/onboarding-emails.service';
 
 const PLAN_PRICES: Record<string, string> = {
   pro:     process.env.STRIPE_PRICE_PRO     ?? '',
@@ -12,7 +13,10 @@ export class BillingService {
   private readonly logger = new Logger(BillingService.name);
   private readonly stripe: InstanceType<typeof Stripe> | null;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private onboardingEmails: OnboardingEmailsService,
+  ) {
     const key = process.env.STRIPE_SECRET_KEY;
     this.stripe = key ? new Stripe(key) : null;
     if (!key) this.logger.warn('STRIPE_SECRET_KEY non défini — paiements Stripe désactivés');
@@ -155,6 +159,8 @@ export class BillingService {
     ]);
 
     this.logger.log(`Checkout complété: userId=${userId} plan=${plan}`);
+    this.onboardingEmails.sendSubscribed(userId, plan)
+      .catch((e) => this.logger.error(`Email de remerciement : ${e.message}`));
   }
 
   private async onSubscriptionUpdated(stripeSub: any) {

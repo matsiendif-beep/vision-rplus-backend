@@ -1,9 +1,14 @@
 import {
   Injectable, NotFoundException,
   ForbiddenException, BadRequestException, Logger,
+  InternalServerErrorException,
 } from '@nestjs/common';
+import { randomUUID }     from 'crypto';
 import { PrismaService }  from '../prisma/prisma.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
+import {
+  DEMO_MARKER, DEMO_COMPANY, DEMO_ACCOUNT_CODES, buildDemoEntries, resolveDemoAccounts,
+} from './demo-company';
 
 // Limites par plan tarifaire
 const COMPANY_LIMITS: Record<string, number> = {
@@ -26,8 +31,12 @@ export class CompaniesService {
       select: { plan: true, _count: { select: { owned_companies: true } } },
     });
 
+    // L'entreprise de démonstration ne compte pas dans la limite du plan
+    const demoCount = await this.prisma.company.count({
+      where: { owner_id: userId, rccm: DEMO_MARKER },
+    });
     const limit   = COMPANY_LIMITS[user!.plan] ?? 1;
-    const current = user!._count.owned_companies;
+    const current = user!._count.owned_companies - demoCount;
 
     if (current >= limit) {
       throw new ForbiddenException(
@@ -106,9 +115,94 @@ export class CompaniesService {
     });
 
     return {
-      owned:  ownedCompanies,
+      owned:  ownedCompanies.map((c) => ({ ...c, is_demo: c.rccm === DEMO_MARKER })),
       shared: memberCompanies.map((m) => ({ ...m.company, role: m.role })),
     };
+  }
+
+  // ── Entreprise de démonstration (onboarding) ───────────────
+  //  Crée une PME fictive SYSCOHADA avec une année d'écritures
+  //  validées. Idempotent : renvoie la démo existante si présente.
+  async createDemo(userId: string) {
+    const existing = await this.prisma.company.findFirst({
+      where:   { owner_id: userId, rccm: DEMO_MARKER, is_active: true },
+      include: { fiscal_years: { orderBy: { start_date: 'desc' } } },
+    });
+    if (existing) return { ...existing, is_demo: true };
+
+    const accounts = await this.prisma.account.findMany({
+      where:   { system: 'ohada', company_id: null, is_active: true, code: { in: DEMO_ACCOUNT_CODES } },
+      select:  { id: true, code: true, label: true },
+      orderBy: { created_at: 'asc' },
+    });
+    const { ids: accountId, missing } = resolveDemoAccounts(accounts);
+    if (missing.length) {
+      this.logger.error(`Démo impossible — comptes OHADA introuvables pour : ${missing.join(', ')}`);
+      throw new InternalServerErrorException('Plan comptable OHADA incomplet : démo indisponible');
+    }
+
+    // Année en cours ; en début d'année, on prend l'année précédente complète
+    // pour que les états financiers soient parlants.
+    const now   = new Date();
+    const year  = now.getUTCMonth() < 2 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
+    const start = new Date(Date.UTC(year, 0, 1));
+    const end   = new Date(Date.UTC(year, 11, 31));
+    const demoEntries = buildDemoEntries(year, now);
+
+    const company = await this.prisma.$transaction(async (tx) => {
+      const c = await tx.company.create({
+        data: {
+          owner_id:          userId,
+          ...DEMO_COMPANY,
+          fiscal_year_start: start,
+          fiscal_year_end:   end,
+        },
+      });
+      const fy = await tx.fiscalYear.create({
+        data: { company_id: c.id, label: `Exercice ${year}`, start_date: start, end_date: end },
+      });
+
+      const entries = demoEntries.map((e) => {
+        const total = e.lines.reduce((s, l) => s + (l.debit ?? 0), 0);
+        return {
+          id:             randomUUID(),
+          company_id:     c.id,
+          fiscal_year_id: fy.id,
+          journal_type:   e.journal,
+          entry_date:     e.date,
+          reference:      e.ref,
+          libelle:        e.libelle,
+          status:         'validee' as const,
+          total_debit:    total,
+          total_credit:   total,
+          created_by:     userId,
+          validated_by:   userId,
+          validated_at:   e.date,
+        };
+      });
+      await tx.journalEntry.createMany({ data: entries });
+      await tx.journalLine.createMany({
+        data: demoEntries.flatMap((e, i) =>
+          e.lines.map((l, j) => ({
+            entry_id:   entries[i].id,
+            company_id: c.id,
+            account_id: accountId.get(l.code)!,
+            libelle:    l.libelle ?? e.libelle,
+            debit:      l.debit  ?? 0,
+            credit:     l.credit ?? 0,
+            line_order: j + 1,
+          })),
+        ),
+      });
+
+      return tx.company.findUniqueOrThrow({
+        where:   { id: c.id },
+        include: { fiscal_years: { orderBy: { start_date: 'desc' } } },
+      });
+    }, { timeout: 30_000 });
+
+    this.logger.log(`Entreprise démo créée pour ${userId} (${demoEntries.length} écritures)`);
+    return { ...company, is_demo: true };
   }
 
   // ── Récupérer une entreprise ───────────────────────────────

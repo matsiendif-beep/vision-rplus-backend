@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import * as argon2       from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { OnboardingEmailsService } from '../email/onboarding-emails.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private prisma:  PrismaService,
     private jwt:     JwtService,
     private config:  ConfigService,
+    private onboardingEmails: OnboardingEmailsService,
   ) {}
 
   // ── Inscription ────────────────────────────────────────────
@@ -50,6 +52,7 @@ export class AuthService {
     });
 
     this.logger.log(`Nouvel utilisateur inscrit : ${user.email}`);
+    this.onboardingEmails.sendWelcome(user);   // asynchrone, ne bloque pas
 
     const tokens = await this.generateTokens(user.id, user.email, user.plan);
     return { user, ...tokens };

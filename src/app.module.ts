@@ -16,11 +16,13 @@ import { SocialModule }      from './social/social.module';
 import { LegalModule }       from './legal/legal.module';
 import { BillingModule }     from './billing/billing.module';
 import { WhatsAppModule }    from './whatsapp/whatsapp.module';
+import { EmailModule }       from './email/email.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    EmailModule,         // Emails transactionnels + séquence d'onboarding (Brevo)
     SeedModule,
 
     // ── Modules existants ────────────────────────────────
