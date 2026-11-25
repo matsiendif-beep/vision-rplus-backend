@@ -4,6 +4,8 @@ import {
 import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AnalyticsService }   from './analytics.service';
+import { NotificationsService } from './notifications.service';
+import { GetUser }            from '../common/decorators';
 import { JwtAuthGuard }       from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 
@@ -12,7 +14,20 @@ import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 @UseGuards(JwtAuthGuard, CompanyAccessGuard)
 @Controller('companies/:companyId/analytics')
 export class AnalyticsController {
-  constructor(private readonly service: AnalyticsService) {}
+  constructor(
+    private readonly service: AnalyticsService,
+    private readonly notifications: NotificationsService,
+  ) {}
+
+  @Get('notifications')
+  @ApiOperation({ summary: 'Notifications de la cloche (alertes, brouillons, reclassements, quota, abonnement)' })
+  getNotifications(
+    @Param('companyId') companyId: string,
+    @Query('fiscal_year_id') fiscalYearId: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.notifications.list(companyId, fiscalYearId || undefined, userId);
+  }
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Dashboard principal — synthèse + KPIs + alertes' })

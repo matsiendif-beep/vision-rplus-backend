@@ -71,6 +71,20 @@ export class AnalyticsService {
     };
   }
 
+  /** Alertes financières de l'exercice (même règles que le tableau de bord, sans enregistrement). */
+  async computeFinancialAlerts(companyId: string, fiscalYearId: string) {
+    const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
+    if (!balances.length) return [];
+    const { produits, charges, resultat } = this.resultParts(balances, sys);
+    const tresorerie = this.sumByPrefix(balances, '5');
+    const out: { type: string; message: string; severity: 'critique' | 'attention' }[] = [];
+    if (tresorerie < 0) out.push({ type: 'tresorerie_negative', message: 'Trésorerie négative : risque de difficultés de paiement', severity: 'critique' });
+    else if (charges > 0 && tresorerie < charges * 0.1) out.push({ type: 'tresorerie_faible', message: 'Trésorerie faible : moins de 10 % des charges de l\'exercice', severity: 'attention' });
+    if (resultat < 0) out.push({ type: 'resultat_negatif', message: 'Résultat déficitaire sur l\'exercice', severity: 'attention' });
+    if (produits > 0 && charges / produits > 0.9) out.push({ type: 'marges_faibles', message: 'Charges supérieures à 90 % du chiffre d\'affaires : marges très faibles', severity: 'attention' });
+    return out;
+  }
+
   // ── KPIs financiers ───────────────────────────────────────
   async getKpis(companyId: string, fiscalYearId: string) {
     const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
@@ -262,8 +276,14 @@ export class AnalyticsService {
       alertes.push({ type: 'marges_faibles', message: 'Charges supérieures à 90% du CA — marges très faibles', severity: 'attention' });
     }
 
-    // Persister les nouvelles alertes critiques
+    // Persister les nouvelles alertes critiques (une seule non lue par type :
+    // auparavant, chaque affichage du tableau de bord en recréait une)
     for (const alerte of alertes.filter(a => a.severity === 'critique')) {
+      const exists = await this.prisma.financialAlert.findFirst({
+        where: { company_id: companyId, type: alerte.type as any, is_read: false },
+        select: { id: true },
+      });
+      if (exists) continue;
       await this.prisma.financialAlert.create({
         data: {
           company_id: companyId,

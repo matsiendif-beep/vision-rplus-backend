@@ -6,6 +6,6 @@ import { ReclassificationService } from './reclassification.service';
 @Module({
   controllers: [AccountsController],
   providers:   [AccountsService, ReclassificationService],
-  exports:     [AccountsService],
+  exports:     [AccountsService, ReclassificationService],
 })
 export class AccountsModule {}
