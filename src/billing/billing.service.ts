@@ -44,10 +44,21 @@ export class BillingService {
 
   // ── Prix Stripe (créés au besoin) ─────────────────────────────
   private async priceId(plan: PaidPlan): Promise<string> {
-    const envId = plan === 'pro' ? process.env.STRIPE_PRICE_PRO : process.env.STRIPE_PRICE_CABINET;
-    if (envId) return envId;
     const cached = this.priceCache.get(plan);
     if (cached) return cached;
+
+    // Prix imposé par variable d'environnement : utilisé seulement s'il existe dans le
+    // mode de la clé (un prix « live » est introuvable avec une clé de test, et inversement).
+    const envId = plan === 'pro' ? process.env.STRIPE_PRICE_PRO : process.env.STRIPE_PRICE_CABINET;
+    if (envId) {
+      try {
+        const p = await this.stripeClient.prices.retrieve(envId);
+        if (p.active) { this.priceCache.set(plan, envId); return envId; }
+        this.logger.warn(`STRIPE_PRICE_${plan.toUpperCase()} (${envId}) est inactif : prix automatique utilisé`);
+      } catch {
+        this.logger.warn(`STRIPE_PRICE_${plan.toUpperCase()} (${envId}) introuvable avec cette clé (mode test/réel ?) : prix automatique utilisé`);
+      }
+    }
 
     const lookup = STRIPE_LOOKUP_KEYS[plan];
     const found = await this.stripeClient.prices.list({ lookup_keys: [lookup], active: true, limit: 1 });
