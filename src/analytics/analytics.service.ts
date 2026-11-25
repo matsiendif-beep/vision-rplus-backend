@@ -1,9 +1,33 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isOhadaClass8Charge, PlanSystem } from '../accounting-plans';
+
+// Règle de classement (source : demande du fondateur, conforme PCG et SYSCOHADA) :
+//   classes 1 à 5 → bilan ; classes 6 à 8 → compte de résultat
+//   (classe 8 : SYSCOHADA uniquement — 81/83/85/87/89 charges, 82/84/86/88 produits ;
+//    la classe 9 — engagements hors bilan, analytique — n'entre dans aucun des deux).
+const isChargeCode  = (sys: PlanSystem, c: string) => c[0] === '6' || (sys === 'ohada' && c[0] === '8' && isOhadaClass8Charge(c));
+const isProduitCode = (sys: PlanSystem, c: string) => c[0] === '7' || (sys === 'ohada' && c[0] === '8' && !isOhadaClass8Charge(c));
 
 @Injectable()
 export class AnalyticsService {
   constructor(private prisma: PrismaService) {}
+
+  private async systemOf(companyId: string): Promise<PlanSystem> {
+    const c = await this.prisma.company.findUnique({ where: { id: companyId }, select: { accounting_system: true } });
+    if (!c) throw new NotFoundException('Entreprise introuvable');
+    return c.accounting_system as PlanSystem;
+  }
+
+  /** Total des charges (solde débiteur) et des produits (solde créditeur) de l'exercice. */
+  private resultParts(balances: any[], sys: PlanSystem) {
+    let charges = 0, produits = 0;
+    for (const b of balances) {
+      if (isChargeCode(sys, b.account_code))  charges  += b.solde;
+      if (isProduitCode(sys, b.account_code)) produits -= b.solde;
+    }
+    return { charges, produits, resultat: produits - charges };
+  }
 
   // ── Dashboard principal ───────────────────────────────────
   async getDashboard(companyId: string, fiscalYearId: string) {
@@ -15,9 +39,9 @@ export class AnalyticsService {
 
     const balances = await this.getBalances(companyId, fiscalYearId);
 
-    const totalProduits = -this.sumByPrefix(balances, '7'); // Classe 7: solde créditeur (négatif) → inversé
-    const totalCharges  =  this.sumByPrefix(balances, '6'); // Classe 6: solde débiteur (positif)
-    const resultatNet   = totalProduits - totalCharges;
+    // Classes 6 à 8 (classe 8 : SYSCOHADA)
+    const { produits: totalProduits, charges: totalCharges, resultat: resultatNet } =
+      this.resultParts(balances, company.accounting_system as PlanSystem);
 
     const tresorerie = this.sumByPrefix(balances, '5');
     const clientsNet = this.sumByPrefix(balances, '411');
@@ -49,9 +73,8 @@ export class AnalyticsService {
 
   // ── KPIs financiers ───────────────────────────────────────
   async getKpis(companyId: string, fiscalYearId: string) {
-    const balances = await this.getBalances(companyId, fiscalYearId);
-    const produits = -this.sumByPrefix(balances, '7');
-    const charges  =  this.sumByPrefix(balances, '6');
+    const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
+    const { produits, charges } = this.resultParts(balances, sys);
     return this.computeKpis(balances, produits, charges);
   }
 
@@ -174,6 +197,7 @@ export class AnalyticsService {
 
   // ── Évolution mensuelle ───────────────────────────────────
   private async getEvolution(companyId: string, fiscalYearId: string) {
+    const sys = await this.systemOf(companyId);
     const entries = await this.prisma.journalEntry.findMany({
       where: { company_id: companyId, fiscal_year_id: fiscalYearId, status: 'validee' },
       include: { lines: { include: { account: { select: { code: true } } } } },
@@ -185,8 +209,9 @@ export class AnalyticsService {
       const monthKey = entry.entry_date.toISOString().slice(0, 7);
       if (!byMonth[monthKey]) byMonth[monthKey] = { produits: 0, charges: 0 };
       for (const line of entry.lines) {
-        if (line.account.code.startsWith('7')) byMonth[monthKey].produits += Number(line.credit);
-        if (line.account.code.startsWith('6')) byMonth[monthKey].charges  += Number(line.debit);
+        const code = line.account.code;
+        if (isProduitCode(sys, code)) byMonth[monthKey].produits += Number(line.credit) - Number(line.debit);
+        if (isChargeCode(sys, code))  byMonth[monthKey].charges  += Number(line.debit)  - Number(line.credit);
       }
     }
     return Object.entries(byMonth).map(([mois, data]) => ({ mois, ...data }));
@@ -285,48 +310,59 @@ export class AnalyticsService {
       .reduce((s, b) => s + b.solde, 0);
   }
 
-  // ── Bilan OHADA ───────────────────────────────────────────
+  // ── Bilan (PCG et SYSCOHADA) ──────────────────────────────
+  //  Tous les comptes des classes 1 à 5 sont repris (aucun oubli possible,
+  //  y compris les sous-comptes créés par l'utilisateur) ; le résultat vient
+  //  des classes 6 à 8. Le bilan est donc équilibré par construction
+  //  dès lors que les écritures sont équilibrées.
   async getBilan(companyId: string, fiscalYearId: string) {
-    const balances = await this.getBalances(companyId, fiscalYearId);
+    const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
+    const ohada = sys === 'ohada';
 
-    const solde = (prefix: string) => this.sumByPrefix(balances, prefix);
+    // Rubriques d'immobilisations (les amortissements 28X et dépréciations 29X
+    // viennent en déduction de la rubrique 2X correspondante)
+    const INCORP = ohada ? ['20', '21'] : ['20'];
+    const CORP   = ohada ? ['22', '23', '24', '25'] : ['21', '22', '23'];
+    const underlying = (c: string) => (/^2[89]\d/.test(c) ? '2' + c[2] : c.slice(0, 2));
+    // Dettes financières : SYSCOHADA 16-19 (19 = provisions pour risques) ; PCG 15-17 (15 = provisions)
+    const DETTES_FIN = ohada ? ['16', '17', '18', '19'] : ['15', '16', '17'];
+    // Capital : SYSCOHADA classe 10 (les réserves sont en 11) ;
+    // PCG 101 capital, 108 compte de l'exploitant, 109 capital non appelé (106 = réserves)
+    const CAPITAL = ohada ? ['10'] : ['101', '108', '109'];
 
-    // ACTIF
-    const immoCorp   = solde('22') + solde('23') + solde('24') + solde('25');
-    const immoIncorp = solde('21') + solde('20');
-    const immoFin    = solde('26') + solde('27') + solde('28');
-    const stocks     = solde('3');
-    const creancesClients  = solde('411') + solde('412');
-    const autresCreances   = Math.max(0,
-      balances.filter(b => b.account_code.startsWith('4') &&
-        !b.account_code.startsWith('401') &&
-        !b.account_code.startsWith('402') &&
-        !b.account_code.startsWith('411') &&
-        !b.account_code.startsWith('412'))
-        .reduce((s, b) => s + Math.max(0, b.solde), 0)
-    );
-    const tresorerieActif = Math.max(0, solde('5'));
+    let immoIncorp = 0, immoCorp = 0, immoFin = 0, stocks = 0;
+    let creancesClients = 0, autresCreances = 0, tresorerieActif = 0;
+    let capital = 0, reserves = 0, empruntsLT = 0, fournisseurs = 0, autresDettes = 0, tresoreriePassif = 0;
 
-    const totalActif = immoCorp + immoIncorp + immoFin + stocks + creancesClients + autresCreances + tresorerieActif;
+    for (const b of balances) {
+      const c: string = b.account_code, s: number = b.solde;   // solde = débit − crédit
+      switch (c[0]) {
+        case '1':
+          if (CAPITAL.some((p) => c.startsWith(p))) capital -= s;
+          else if (DETTES_FIN.some((p) => c.startsWith(p))) empruntsLT -= s;
+          else reserves -= s;                                   // réserves, report à nouveau, subventions, provisions réglementées…
+          break;
+        case '2': {
+          const u = underlying(c);
+          if (INCORP.includes(u)) immoIncorp += s; else if (CORP.includes(u)) immoCorp += s; else immoFin += s;
+          break;
+        }
+        case '3': stocks += s; break;                           // y compris dépréciations 39 (en déduction)
+        case '4':
+          if (c.startsWith('49'))      autresCreances += s;      // dépréciations des comptes de tiers (en déduction)
+          else if (s > 0)              { if (c.startsWith('41')) creancesClients += s; else autresCreances += s; }
+          else if (s < 0)              { if (c.startsWith('40')) fournisseurs -= s;    else autresDettes -= s; }
+          break;
+        case '5':
+          if (c.startsWith('59'))      tresorerieActif += s;     // dépréciations (en déduction)
+          else if (s >= 0)             tresorerieActif += s;
+          else                         tresoreriePassif -= s;    // découverts, crédits de trésorerie
+          break;
+      }
+    }
 
-    // PASSIF
-    const capital    = Math.abs(solde('101') + solde('102') + solde('103') + solde('104'));
-    const reserves   = Math.abs(solde('11') + solde('12') + solde('13'));
-    const produits   = -this.sumByPrefix(balances, '7'); // Classe 7: solde créditeur → inversé
-    const charges    =  this.sumByPrefix(balances, '6'); // Classe 6: solde débiteur
-    const resultatNet = produits - charges;
-    const empruntsLT  = Math.abs(solde('16') + solde('17') + solde('18'));
-    const fournisseurs = Math.abs(solde('401') + solde('402'));
-    const autresDettes = Math.abs(
-      balances.filter(b => b.account_code.startsWith('4') &&
-        !b.account_code.startsWith('401') &&
-        !b.account_code.startsWith('402') &&
-        !b.account_code.startsWith('411') &&
-        !b.account_code.startsWith('412'))
-        .reduce((s, b) => s + Math.min(0, b.solde), 0)
-    );
-    const tresoreriePassif = Math.abs(Math.min(0, solde('5')));
-
+    const { resultat: resultatNet } = this.resultParts(balances, sys);
+    const totalActif  = immoIncorp + immoCorp + immoFin + stocks + creancesClients + autresCreances + tresorerieActif;
     const totalPassif = capital + reserves + resultatNet + empruntsLT + fournisseurs + autresDettes + tresoreriePassif;
 
     return {
@@ -366,48 +402,44 @@ export class AnalyticsService {
         total_passif:      totalPassif,
       },
       equilibre: Math.abs(totalActif - totalPassif) < 1,
+      system:    sys,
     };
   }
 
-  // ── Compte de résultat ───────────────────────────────────
+  // ── Compte de résultat (classes 6 à 8) ────────────────────
+  //  Rubriques selon le plan de l'entreprise :
+  //   SYSCOHADA : 60 achats · 61-63 services extérieurs · 64 impôts et taxes ·
+  //               66 personnel · 67 frais financiers · 68-69 dotations · 89 impôt ;
+  //               70 ventes · 71 subventions · 77 revenus financiers ; classe 8 HAO
+  //   PCG       : 60 achats · 61-62 services extérieurs · 63 impôts et taxes ·
+  //               64 personnel · 66 charges financières · 68 dotations · 69 impôt ;
+  //               70 ventes · 74 subventions · 76 produits financiers
   async getCompteResultat(companyId: string, fiscalYearId: string) {
-    const balances = await this.getBalances(companyId, fiscalYearId);
-    const solde = (prefix: string) => Math.abs(this.sumByPrefix(balances, prefix));
+    const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
+    const ohada = sys === 'ohada';
+    const sumCh = (...p: string[]) => balances.filter((b) => isChargeCode(sys, b.account_code) && p.some((x) => b.account_code.startsWith(x))).reduce((s, b) => s + b.solde, 0);
+    const sumPr = (...p: string[]) => -balances.filter((b) => isProduitCode(sys, b.account_code) && p.some((x) => b.account_code.startsWith(x))).reduce((s, b) => s + b.solde, 0);
+    const { produits: totalProduits, charges: totalCharges, resultat: resultatNet } = this.resultParts(balances, sys);
 
-    // ── Produits (classe 7 complète) ─────────────────────────
-    const ca           = solde('70') + solde('71') + solde('72');
-    const subvExpl     = solde('74');
-    const autresProd   = solde('73') + solde('75') + solde('77') + solde('78') + solde('79');
-    const prodFin      = solde('76');
-    const totalProduitsEnum = ca + subvExpl + autresProd + prodFin;
-    // Catch-all: tout ce qui est en classe 7 mais non capturé ci-dessus
-    const totalProduits7 = Math.abs(this.sumByPrefix(balances, '7'));
-    const autresProdCatchAll = Math.max(0, totalProduits7 - totalProduitsEnum);
-    const totalProduits = totalProduits7; // on utilise la vraie somme classe 7
+    const ca       = sumPr('70');
+    const subvExpl = ohada ? sumPr('71') : sumPr('74');
+    const prodFin  = ohada ? sumPr('77') : sumPr('76');
+    const autresProd = totalProduits - ca - subvExpl - prodFin;   // dont produits HAO (classe 8)
 
-    // ── Charges (classe 6 complète) ──────────────────────────
-    const achats         = solde('60') + solde('61');
-    const servicesExt    = solde('62');
-    const impotsTaxes    = solde('63');
-    const chargesPers    = solde('64');
-    const autresGestion  = solde('65');
-    const chargesFin     = solde('66');
-    const chargesExcept  = solde('67'); // Charges exceptionnelles (ex: 674 Charges sociales)
-    const dotations      = solde('68');
-    const impotResultat  = solde('69') + solde('89');
-    const totalChargesEnum = achats + servicesExt + impotsTaxes + chargesPers + autresGestion + chargesFin + chargesExcept + dotations + impotResultat;
-    // Catch-all: tout ce qui est en classe 6 mais non capturé ci-dessus
-    const totalCharges6 = this.sumByPrefix(balances, '6');
-    const autresChargesCatchAll = Math.max(0, totalCharges6 - totalChargesEnum);
-    const totalCharges = totalCharges6; // on utilise la vraie somme classe 6
-
-    const resultatNet = totalProduits - totalCharges;
+    const achats        = sumCh('60');
+    const servicesExt   = ohada ? sumCh('61', '62', '63') : sumCh('61', '62');
+    const impotsTaxes   = ohada ? sumCh('64') : sumCh('63');
+    const chargesPers   = ohada ? sumCh('66') : sumCh('64');
+    const chargesFin    = ohada ? sumCh('67') : sumCh('66');
+    const dotations     = ohada ? sumCh('68', '69') : sumCh('68');
+    const impotResultat = ohada ? sumCh('89') : sumCh('69');
+    const autresCharges = totalCharges - achats - servicesExt - impotsTaxes - chargesPers - chargesFin - dotations - impotResultat;
 
     return {
       produits: {
         chiffre_affaires:    ca,
         subventions_expl:    subvExpl,
-        autres_produits:     autresProd + autresProdCatchAll,
+        autres_produits:     autresProd,
         produits_financiers: prodFin,
         total_produits:      totalProduits,
       },
@@ -416,7 +448,7 @@ export class AnalyticsService {
         services_exterieurs:      servicesExt,
         impots_taxes:             impotsTaxes,
         charges_personnel:        chargesPers,
-        autres_charges:           autresGestion + chargesExcept + autresChargesCatchAll,
+        autres_charges:           autresCharges,   // dont charges HAO (classe 8) et charges exceptionnelles
         charges_financieres:      chargesFin,
         dotations_amortissements: dotations,
         impot_sur_resultat:       impotResultat,
@@ -425,6 +457,7 @@ export class AnalyticsService {
       resultat_net:    resultatNet,
       nature:          resultatNet >= 0 ? 'benefice' : 'perte',
       nature_resultat: resultatNet >= 0 ? 'benefice' : 'perte',
+      system:          sys,
       marge_brute:     totalProduits > 0 ? Math.round((resultatNet / totalProduits) * 10000) / 100 : 0,
     };
   }

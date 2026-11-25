@@ -1,10 +1,14 @@
 // ── accounts/accounts.controller.ts ──────────────────────────
 import {
   Controller, Get, Post, Patch, Delete,
-  Body, Param, Query, UseGuards,
+  Body, Param, Query, UseGuards, Req, ForbiddenException,
 } from '@nestjs/common';
+
+// Les membres invités en « lecture » ne peuvent pas modifier le plan comptable
+const assertCanEdit = (req: any) => {
+  if (req.userRole === 'lecture') throw new ForbiddenException('Accès en lecture seule : vous ne pouvez pas modifier le plan comptable.');
+};
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { AccountingSystem } from '@prisma/client';
 import { AccountsService }  from './accounts.service';
 import { CreateAccountDto, UpdateAccountDto, FilterAccountsDto } from './dto/account.dto';
 import { JwtAuthGuard }      from '../common/guards/jwt-auth.guard';
@@ -31,13 +35,11 @@ export class AccountsController {
   @Get('search')
   @ApiOperation({ summary: 'Recherche rapide de comptes (autocomplete)' })
   @ApiQuery({ name: 'q',      required: true,  description: 'Code ou libellé' })
-  @ApiQuery({ name: 'system', required: false, enum: AccountingSystem })
   search(
     @Param('companyId') companyId: string,
     @Query('q') query: string,
-    @Query('system') system: AccountingSystem,
   ) {
-    return this.service.search(companyId, query, system);
+    return this.service.search(companyId, query);
   }
 
   // GET /companies/:companyId/accounts/:accountId
@@ -52,11 +54,13 @@ export class AccountsController {
 
   // POST /companies/:companyId/accounts
   @Post()
-  @ApiOperation({ summary: 'Créer un compte personnalisé' })
+  @ApiOperation({ summary: 'Créer un sous-compte (hérite de la classe du compte parent)' })
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateAccountDto,
+    @Req() req: any,
   ) {
+    assertCanEdit(req);
     return this.service.create(companyId, dto);
   }
 
@@ -67,7 +71,9 @@ export class AccountsController {
     @Param('accountId') accountId: string,
     @Param('companyId') companyId: string,
     @Body() dto: UpdateAccountDto,
+    @Req() req: any,
   ) {
+    assertCanEdit(req);
     return this.service.update(accountId, companyId, dto);
   }
 
@@ -77,7 +83,9 @@ export class AccountsController {
   remove(
     @Param('accountId') accountId: string,
     @Param('companyId') companyId: string,
+    @Req() req: any,
   ) {
+    assertCanEdit(req);
     return this.service.remove(accountId, companyId);
   }
 }

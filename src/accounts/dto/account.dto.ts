@@ -1,46 +1,33 @@
 import {
   IsString, IsEnum, IsOptional,
-  IsBoolean, MaxLength, Matches,
+  IsBoolean, MaxLength, MinLength, Matches,
 } from 'class-validator';
-import { PartialType } from '@nestjs/mapped-types';
-import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { AccountingSystem, AccountType } from '@prisma/client';
 
+/** Création d'un sous-compte. Le type, la classe et le plan sont déduits
+ *  automatiquement du compte parent : ils ne peuvent pas être choisis. */
 export class CreateAccountDto {
-  @ApiProperty({ example: '706', description: 'Code du compte (ex: 706, 401, 521)' })
   @IsString()
-  @MaxLength(10)
-  @Matches(/^\d+$/, { message: 'Le code doit être numérique' })
+  @Matches(/^\d{3,10}$/, { message: 'Le numéro de compte doit comporter de 3 à 10 chiffres' })
   code: string;
 
-  @ApiProperty({ example: 'Services vendus' })
   @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @MinLength(2, { message: 'Indiquez un libellé (2 caractères minimum)' })
   @MaxLength(255)
   label: string;
-
-  @ApiProperty({ enum: AccountType, example: 'produit' })
-  @IsEnum(AccountType, {
-    message: 'Type invalide. Valeurs : actif, passif, charge, produit, tresorerie, analytique',
-  })
-  type: AccountType;
-
-  @ApiProperty({ enum: AccountingSystem, example: 'pcg_france' })
-  @IsEnum(AccountingSystem)
-  system: AccountingSystem;
-
-  @ApiProperty({ example: '70', required: false, description: 'Code du compte parent' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(10)
-  parent_code?: string;
-
-  @ApiProperty({ example: true, default: true })
-  @IsOptional()
-  @IsBoolean()
-  is_detail?: boolean;
 }
 
-export class UpdateAccountDto extends PartialType(CreateAccountDto) {}
+/** Seul le libellé d'un sous-compte peut être modifié (le numéro fixe sa place
+ *  dans le bilan ou le compte de résultat). */
+export class UpdateAccountDto {
+  @IsString()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @MinLength(2, { message: 'Indiquez un libellé (2 caractères minimum)' })
+  @MaxLength(255)
+  label: string;
+}
 
 export class FilterAccountsDto {
   @IsOptional()
@@ -56,6 +43,7 @@ export class FilterAccountsDto {
   search?: string;       // Recherche sur code ou label
 
   @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   is_detail?: boolean;
 }

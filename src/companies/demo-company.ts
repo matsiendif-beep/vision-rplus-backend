@@ -25,7 +25,7 @@ export const DEMO_COMPANY = {
 export const DEMO_ACCOUNT_ROLES = {
   capital:       [{ code: '1013' }, { code: '101', label: /capital/i }],
   emprunt:       [{ code: '162', label: /cr[ée]dit/i }, { code: '162' }, { code: '16' }],
-  materiel:      [{ code: '244', label: /informatique/i }, { code: '245', label: /informatique/i }, { code: '2441' }, { code: '244' }],
+  materiel:      [{ code: '2442', label: /informatique/i }, { code: '244', label: /informatique/i }, { code: '245', label: /informatique/i }, { code: '2441' }, { code: '244' }],
   fournisseurs:  [{ code: '401' }, { code: '4011' }],
   clients:       [{ code: '411' }, { code: '4111' }],
   tva_collectee: [{ code: '4431' }, { code: '4414' }, { code: '443', label: /TVA/i }],

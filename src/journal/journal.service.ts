@@ -22,6 +22,14 @@ export class JournalService {
     private limits:  PlanLimitsService,
   ) {}
 
+  /** Plan comptable de l'entreprise : seuls ses comptes système sont utilisables
+   *  (évite qu'une entreprise OHADA reçoive un compte PCG de même numéro). */
+  private async companySystem(companyId: string) {
+    const c = await this.prisma.company.findUnique({ where: { id: companyId }, select: { accounting_system: true } });
+    if (!c) throw new NotFoundException('Entreprise introuvable');
+    return c.accounting_system;
+  }
+
   // ══════════════════════════════════════════════════════════
   //  CRÉER UNE ÉCRITURE
   // ══════════════════════════════════════════════════════════
@@ -66,7 +74,7 @@ export class JournalService {
           is_active: true,
           OR: [
             { company_id: companyId },
-            { company_id: null },
+            { company_id: null, system: await this.companySystem(companyId) },
           ],
         },
       });
@@ -240,7 +248,7 @@ export class JournalService {
             is_active: true,
             OR: [
               { company_id: companyId },
-              { company_id: null },
+              { company_id: null, system: await this.companySystem(companyId) },
             ],
           },
         });
@@ -352,7 +360,7 @@ export class JournalService {
         is_active: true,
         OR: [
           { company_id: companyId },
-          { company_id: null },
+          { company_id: null, system: await this.companySystem(companyId) },
         ],
       },
     });
@@ -585,10 +593,13 @@ export class JournalService {
     const accounts = await this.prisma.account.findMany({
       where: {
         is_active: true,
-        OR: [{ company_id: companyId }, { company_id: null }],
+        OR: [{ company_id: companyId }, { company_id: null, system: await this.companySystem(companyId) }],
       },
-      select: { id: true, code: true },
+      select: { id: true, code: true, label: true },
     });
+    // Si un numéro existe en double (ancien libellé conservé + compte officiel),
+    // l'import utilise le compte officiel : les anciens passent en premier et sont écrasés.
+    accounts.sort((a, b) => Number(b.label.includes('(ancien libellé')) - Number(a.label.includes('(ancien libellé')));
     const accountByCode = new Map(accounts.map((a) => [a.code.trim(), a.id]));
 
     // Résolution par préfixe décroissant : '706100' → '7061' → '706' → '70'
