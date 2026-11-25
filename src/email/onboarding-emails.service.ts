@@ -24,7 +24,7 @@ const HOUR = 3_600_000;
 const DAY  = 24 * HOUR;
 const UNSUBSCRIBED = 'email.unsubscribed';
 
-interface Recipient { id: string; email: string; first_name: string }
+interface Recipient { id: string; email: string; first_name: string; plan?: string }
 
 @Injectable()
 export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
@@ -61,7 +61,7 @@ export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
       const now = Date.now();
       // J+1 : inscrits il y a 1 à 7 jours, sans écriture réelle
       for (const u of await this.inactiveUsers(now - 7 * DAY, now - 1 * DAY)) {
-        await this.sendOnce(u, 'activation', (ctx) => T.activation(ctx));
+        await this.sendOnce(u, 'activation', (ctx) => T.activation(ctx, u.plan));
       }
       // J+3 : inscrits il y a 3 à 10 jours, toujours sans écriture réelle
       //       (au moins 2 jours après l'email J+1, pour ne pas envoyer les deux d'un coup)
@@ -143,7 +143,7 @@ export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
     const users = await this.prisma.user.findMany({
       where:  { is_active: true, created_at: { gte: new Date(from), lte: new Date(to) } },
       select: {
-        id: true, email: true, first_name: true,
+        id: true, email: true, first_name: true, plan: true,
         owned_companies: {
           select: { rccm: true, _count: { select: { journal_entries: true } } },
         },
