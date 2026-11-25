@@ -94,7 +94,7 @@ Vous décidez ensuite si l'outil vous convient.</p>
 // J-3 avant la fin de l'essai
 export function trialEnding(ctx: TemplateContext, endsAt: Date): RenderedEmail {
   const date = endsAt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-  const url  = `${ctx.appUrl}/settings`;
+  const url  = `${ctx.appUrl}/abonnement`;
   return {
     subject: `Votre essai Vision R+ se termine le ${date}`,
     html: layout(ctx, `
@@ -105,6 +105,23 @@ et vous gardez toutes vos données et vos états financiers.</p>
 <p>Si quelque chose vous freine, répondez à cet email : je veux savoir ce qu'on peut améliorer.</p>`,
       { label: 'Gérer mon abonnement', url }),
     text: `${hello(ctx)}\n\nVotre essai se termine le ${date}. Gérez votre abonnement : ${url}${footerText(ctx)}`,
+  };
+}
+
+// Mobile Money — 3 jours avant la fin des 30 jours (pas de renouvellement automatique)
+export function mobileMoneyEnding(ctx: TemplateContext, plan: string, endsAt: Date): RenderedEmail {
+  const date = endsAt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  const url  = `${ctx.appUrl}/abonnement`;
+  return {
+    subject: `Votre accès ${plan} se termine le ${date}`,
+    html: layout(ctx, `
+<p>${hello(ctx)}</p>
+<p>Votre accès <b>${esc(plan)}</b> payé par Mobile Money se termine le <b>${date}</b>.
+Le paiement Mobile Money ne se renouvelle pas automatiquement.</p>
+<p>Pour continuer sans interruption, renouvelez en quelques secondes depuis votre espace Abonnement.
+Sans renouvellement, votre compte repassera à la formule Gratuit : vos données sont conservées.</p>`,
+      { label: 'Renouveler mon accès', url }),
+    text: `${hello(ctx)}\n\nVotre accès ${plan} (Mobile Money) se termine le ${date}. Renouvelez ici : ${url}\nSans renouvellement, votre compte repasse au Gratuit (données conservées).${footerText(ctx)}`,
   };
 }
 

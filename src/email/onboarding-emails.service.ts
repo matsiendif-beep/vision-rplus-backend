@@ -16,7 +16,9 @@ import { EmailService }  from './email.service';
 import { DEMO_MARKER }   from '../companies/demo-company';
 import * as T from './templates';
 
-type EmailKey = 'welcome' | 'activation' | 'help' | 'trial_ending' | 'subscribed';
+type EmailKey = 'welcome' | 'activation' | 'help' | 'trial_ending' | 'subscribed' | 'momo_ending';
+// Emails liés au compte ou à l'abonnement : envoyés même après désinscription des conseils
+const TRANSACTIONAL: EmailKey[] = ['subscribed', 'momo_ending', 'trial_ending'];
 
 const HOUR = 3_600_000;
 const DAY  = 24 * HOUR;
@@ -106,6 +108,17 @@ export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
     await this.sendOnce(user, 'subscribed', (ctx) => T.subscribed(ctx, label), plan);
   }
 
+  /** Rappel Mobile Money J-3 (une fois par période : recordId = abonnement + échéance). */
+  async sendMobileMoneyEnding(userId: string, plan: string, endsAt: Date, subscriptionId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId }, select: { id: true, email: true, first_name: true },
+    });
+    if (!user) return;
+    const label = plan === 'cabinet' ? 'Cabinet' : plan === 'pro' ? 'Pro' : plan;
+    await this.sendOnce(user, 'momo_ending', (ctx) => T.mobileMoneyEnding(ctx, label, endsAt),
+      `${subscriptionId}:${endsAt.toISOString().slice(0, 10)}`);
+  }
+
   // ── Désinscription ─────────────────────────────────────────
   unsubscribeToken(userId: string): string {
     const secret = process.env.JWT_SECRET ?? 'visionrplus';
@@ -158,8 +171,7 @@ export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
   ) {
     const action = `email.${key}`;
     if (await this.hasLog(user.id, action, recordId)) return;
-    // L'email "subscribed" est transactionnel : envoyé même après désinscription des conseils
-    if (key !== 'subscribed' && (await this.hasLog(user.id, UNSUBSCRIBED))) return;
+    if (!TRANSACTIONAL.includes(key) && (await this.hasLog(user.id, UNSUBSCRIBED))) return;
 
     const appUrl = (process.env.APP_URL ?? 'https://www.visionrplus.com').replace(/\/$/, '');
     const ctx: T.TemplateContext = {
