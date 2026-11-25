@@ -64,8 +64,9 @@ export function activation(ctx: TemplateContext): RenderedEmail {
     html: layout(ctx, `
 <p>${hello(ctx)}</p>
 <p>Vous tenez déjà votre comptabilité sur Excel ? Pas besoin de tout ressaisir.</p>
-<p>Dans <b>Journal → Importer</b>, déposez votre fichier : Vision R+ génère automatiquement
-le Grand Livre, la Balance, le Compte de résultat et le Bilan.</p>
+<p>Dans Excel, faites <b>Fichier → Enregistrer sous → CSV</b>, puis dans Vision R+ <b>Journal → Importer</b> :
+Vision R+ génère automatiquement le Grand Livre, la Balance, le Compte de résultat et le Bilan.</p>
+<p style="color:#64748b;font-size:13px">Plan Gratuit : 10 écritures par mois. Pour importer un journal complet, essayez le plan Pro 14 jours gratuitement.</p>
 <p>Pas de fichier sous la main ? Ouvrez l'<b>entreprise de démonstration</b> pour voir le résultat final.</p>`,
       { label: 'Importer mon journal', url }),
     text: `${hello(ctx)}\n\nImportez votre journal Excel en 2 minutes : ${url}\nVision R+ génère ensuite Grand Livre, Balance, Compte de résultat et Bilan.${footerText(ctx)}`,

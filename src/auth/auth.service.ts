@@ -6,6 +6,10 @@ import {
 
 // Blocage temporaire d'un compte après trop d'échecs de connexion
 // (protège contre la recherche de mot de passe, même si l'attaquant change d'IP).
+import { LEGAL_VERSION, LEGAL_ACCEPTED_ACTION } from '../legal/legal-version';
+
+export interface RequestContext { ip?: string; userAgent?: string }
+
 const MAX_FAILED_LOGINS = 5;
 const FAILED_WINDOW_MS  = 15 * 60_000;
 const LOCK_DURATION_MS  = 15 * 60_000;
@@ -30,7 +34,7 @@ export class AuthService {
   ) {}
 
   // ── Inscription ────────────────────────────────────────────
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, ctx: RequestContext = {}) {
     // Vérifier si l'email est déjà utilisé
     const exists = await this.prisma.user.findUnique({
       where: { email: dto.email.trim().toLowerCase() },
@@ -62,6 +66,8 @@ export class AuthService {
     });
 
     this.logger.log(`Nouvel utilisateur inscrit : ${user.email}`);
+    // Preuve de l'acceptation des CGU/CGV (case cochée à l'inscription)
+    await this.recordTermsAcceptance(user.id, LEGAL_VERSION, ctx);
     this.onboardingEmails.sendWelcome(user);   // asynchrone, ne bloque pas
 
     const tokens = await this.generateTokens(user.id, user.email, user.plan);
@@ -107,6 +113,41 @@ export class AuthService {
     };
   }
 
+  // ── Conditions générales ───────────────────────────────────
+  /** Dernière version acceptée par l'utilisateur (null s'il n'a jamais accepté). */
+  async acceptedTermsVersion(userId: string): Promise<string | null> {
+    const last = await this.prisma.auditLog.findFirst({
+      where:   { user_id: userId, action: LEGAL_ACCEPTED_ACTION },
+      orderBy: { created_at: 'desc' },
+      select:  { record_id: true },
+    });
+    return last?.record_id ?? null;
+  }
+
+  async acceptTerms(userId: string, version: string, ctx: RequestContext = {}) {
+    if (version !== LEGAL_VERSION) {
+      throw new BadRequestException('Cette version des conditions n\'est plus en vigueur. Rechargez la page.');
+    }
+    if ((await this.acceptedTermsVersion(userId)) !== LEGAL_VERSION) {
+      await this.recordTermsAcceptance(userId, LEGAL_VERSION, ctx);
+    }
+    return { accepted_version: LEGAL_VERSION };
+  }
+
+  private recordTermsAcceptance(userId: string, version: string, ctx: RequestContext) {
+    return this.prisma.auditLog.create({
+      data: {
+        user_id:    userId,
+        action:     LEGAL_ACCEPTED_ACTION,
+        table_name: 'legal',
+        record_id:  version,
+        new_values: { version, documents: ['cgu-cgv', 'confidentialite'] },
+        ip_address: ctx.ip?.slice(0, 64),
+        user_agent: ctx.userAgent?.slice(0, 500),
+      },
+    });
+  }
+
   // ── Protection contre les essais de mots de passe ──────────
   private assertNotLocked(email: string) {
     const entry = this.failedLogins.get(email);
@@ -142,6 +183,12 @@ export class AuthService {
 
   // ── Profil utilisateur connecté ────────────────────────────
   async getMe(userId: string) {
+    const [user, accepted] = await Promise.all([this.findMe(userId), this.acceptedTermsVersion(userId)]);
+    if (!user) return user;
+    return { ...user, legal: { current_version: LEGAL_VERSION, accepted_version: accepted } };
+  }
+
+  private findMe(userId: string) {
     return this.prisma.user.findUnique({
       where:  { id: userId },
       select: {

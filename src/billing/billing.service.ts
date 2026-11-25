@@ -40,6 +40,9 @@ export class BillingService {
       `${user.first_name} ${user.last_name}`,
     );
 
+    // Essai gratuit de 14 jours : une seule fois par compte (CGV art. 6)
+    const hadSubscription = await this.prisma.subscription.count({ where: { user_id: userId } });
+
     const session = await this.stripeClient.checkout.sessions.create({
       customer:   customerId,
       mode:       'subscription',
@@ -48,7 +51,7 @@ export class BillingService {
       cancel_url:  `${process.env.FRONTEND_URL}/dashboard?upgrade=cancelled`,
       metadata:    { userId, plan },
       subscription_data: {
-        trial_period_days: 14,
+        ...(hadSubscription === 0 ? { trial_period_days: 14 } : {}),
         metadata: { userId, plan },
       },
     });

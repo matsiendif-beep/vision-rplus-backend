@@ -10,12 +10,7 @@ import {
   DEMO_MARKER, DEMO_COMPANY, DEMO_ACCOUNT_CODES, buildDemoEntries, resolveDemoAccounts,
 } from './demo-company';
 
-// Limites par plan tarifaire
-const COMPANY_LIMITS: Record<string, number> = {
-  free:    1,
-  pro:     3,
-  cabinet: Infinity,
-};
+import { COMPANY_LIMITS, CABINET_EXTRA_COMPANY } from '../common/plan/plan-limits.service';
 
 @Injectable()
 export class CompaniesService {
@@ -28,20 +23,26 @@ export class CompaniesService {
     // Vérifier la limite du plan
     const user = await this.prisma.user.findUnique({
       where:  { id: userId },
-      select: { plan: true, _count: { select: { owned_companies: true } } },
+      select: { plan: true },
     });
 
-    // L'entreprise de démonstration ne compte pas dans la limite du plan
-    const demoCount = await this.prisma.company.count({
-      where: { owner_id: userId, rccm: DEMO_MARKER },
+    // Seules les entreprises actives comptent ; la démo n'est jamais comptée.
+    const active = await this.prisma.company.findMany({
+      where:  { owner_id: userId, is_active: true },
+      select: { rccm: true },
     });
     const limit   = COMPANY_LIMITS[user!.plan] ?? 1;
-    const current = user!._count.owned_companies - demoCount;
+    const current = active.filter((c) => c.rccm !== DEMO_MARKER).length;
 
     if (current >= limit) {
+      const labels: Record<string, string> = { free: 'Gratuit', pro: 'Pro', cabinet: 'Cabinet' };
       throw new ForbiddenException(
-        `Votre plan "${user!.plan}" est limité à ${limit} entreprise(s). ` +
-        `Passez au plan supérieur pour en créer davantage.`,
+        user!.plan === 'cabinet'
+          ? `Votre plan Cabinet inclut ${limit} entreprises. Chaque entreprise supplémentaire est facturée ` +
+            `${CABINET_EXTRA_COMPANY.EUR} €/mois (${CABINET_EXTRA_COMPANY.XAF.toLocaleString('fr-FR')} FCFA) : ` +
+            `écrivez à contact@visionrplus.com pour l'ajouter.`
+          : `Votre plan ${labels[user!.plan] ?? user!.plan} est limité à ${limit} entreprise${limit > 1 ? 's' : ''}. ` +
+            `Passez au plan supérieur pour en créer davantage.`,
       );
     }
 

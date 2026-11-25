@@ -10,6 +10,7 @@ import { CompaniesService }  from './companies.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
 import { JwtAuthGuard }      from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
+import { PlanLimitsService, FREE_MONTHLY_ENTRIES } from '../common/plan/plan-limits.service';
 import { GetUser }           from '../common/decorators';
 
 class CreateFiscalYearDto {
@@ -25,7 +26,10 @@ class CreateFiscalYearDto {
 @UseGuards(JwtAuthGuard, CompanyAccessGuard)
 @Controller('companies')
 export class CompaniesController {
-  constructor(private readonly service: CompaniesService) {}
+  constructor(
+    private readonly service: CompaniesService,
+    private readonly limits:  PlanLimitsService,
+  ) {}
 
   // POST /companies
   @Post()
@@ -67,6 +71,16 @@ export class CompaniesController {
   @ApiOperation({ summary: 'Statistiques rapides de l\'entreprise' })
   getStats(@Param('companyId') companyId: string) {
     return this.service.getStats(companyId);
+  }
+
+  // GET /companies/:companyId/usage — quota d'écritures du plan Gratuit
+  @Get(':companyId/usage')
+  @ApiOperation({ summary: 'Consommation du quota mensuel d\'écritures (plan Gratuit)' })
+  async getUsage(@Param('companyId') companyId: string) {
+    const u = await this.limits.entryUsage(companyId);
+    return u.limited
+      ? { limited: true, used: u.used, limit: FREE_MONTHLY_ENTRIES, remaining: u.remaining }
+      : { limited: false };
   }
 
   // GET /companies/:companyId/fiscal-years

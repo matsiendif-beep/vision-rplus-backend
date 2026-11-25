@@ -19,6 +19,7 @@ import { LegalModule }       from './legal/legal.module';
 import { BillingModule }     from './billing/billing.module';
 import { WhatsAppModule }    from './whatsapp/whatsapp.module';
 import { EmailModule }       from './email/email.module';
+import { PlanLimitsModule }  from './common/plan/plan-limits.module';
 
 @Module({
   imports: [
@@ -31,7 +32,8 @@ import { EmailModule }       from './email/email.module';
       errorMessage: 'Trop de requêtes en peu de temps. Patientez une minute puis réessayez.',
     }),
     PrismaModule,
-    EmailModule,         // Emails transactionnels + séquence d'onboarding (Brevo)
+    PlanLimitsModule,    // Limites des formules (écritures/mois du plan Gratuit)
+    EmailModule,        // Emails transactionnels + séquence d'onboarding (Brevo)
     SeedModule,
 
     // ── Modules existants ────────────────────────────────

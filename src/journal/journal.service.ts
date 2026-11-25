@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService }    from '../prisma/prisma.service';
 import { AccountingEngine } from './accounting.engine';
+import { PlanLimitsService } from '../common/plan/plan-limits.service';
 import {
   CreateJournalEntryDto,
   UpdateJournalEntryDto,
@@ -18,6 +19,7 @@ export class JournalService {
   constructor(
     private prisma:  PrismaService,
     private engine:  AccountingEngine,
+    private limits:  PlanLimitsService,
   ) {}
 
   // ══════════════════════════════════════════════════════════
@@ -38,6 +40,8 @@ export class JournalService {
         'Cet exercice est clôturé. Aucune écriture ne peut y être ajoutée.',
       );
     }
+    // Plan Gratuit : 10 écritures par mois
+    await this.limits.assertCanCreateEntries(companyId, 1);
 
     // 2. Vérifier que la date est dans l'exercice
     const entryDate = new Date(dto.entry_date);
@@ -543,10 +547,32 @@ export class JournalService {
   //  Les lignes sont groupées par (piece + date + libelle) en une seule écriture
   // ══════════════════════════════════════════════════════════
   async importCsv(companyId: string, userId: string, fileBuffer: Buffer) {
-    const text = fileBuffer.toString('utf-8');
+    // Encodage : UTF-8 (« CSV UTF-8 ») ou Windows-1252 (« CSV » d'un Excel français)
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(fileBuffer);
+    } catch {
+      text = new TextDecoder('windows-1252').decode(fileBuffer);
+    }
+    text = text.replace(/^﻿/, '');
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
 
     if (lines.length < 2) throw new BadRequestException('Fichier CSV vide ou invalide');
+
+    // Séparateur : « ; » (Excel français) ou « , » — déduit de la ligne d'en-tête
+    const header = lines[0];
+    const sep = (header.match(/;/g)?.length ?? 0) > (header.match(/,/g)?.length ?? 0) ? ';' : ',';
+    // Montants : accepte « 1 234,56 » (format français) et « 1234.56 »
+    const parseAmount = (s: string | undefined) => {
+      if (!s) return 0;
+      const n = parseFloat(s.replace(/[\s  ]/g, '').replace(',', '.'));
+      return Number.isFinite(n) ? n : 0;
+    };
+    // Dates : accepte AAAA-MM-JJ et JJ/MM/AAAA (format français)
+    const normalizeDate = (s: string) => {
+      const fr = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+      return fr ? `${fr[3]}-${fr[2].padStart(2, '0')}-${fr[1].padStart(2, '0')}` : s;
+    };
 
     // Trouver le fiscal year ouvert
     const fiscalYear = await this.prisma.fiscalYear.findFirst({
@@ -582,10 +608,15 @@ export class JournalService {
     const errors: string[] = [];
 
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map((c) => c.trim());
+      const cols = lines[i].split(sep).map((c) => c.trim().replace(/^"(.*)"$/, '$1'));
       if (cols.length < 7) continue;
-      const [date, piece, compte, tiers, libelle, debitStr, creditStr, journal_type] = cols;
-      if (!date || !piece || !compte) continue;
+      const [rawDate, piece, compte, tiers, libelle, debitStr, creditStr, journal_type] = cols;
+      if (!rawDate || !piece || !compte) continue;
+      const date = normalizeDate(rawDate);
+      if (Number.isNaN(new Date(date).getTime())) {
+        errors.push(`Ligne ${i + 1}: date "${rawDate}" invalide (formats acceptés : 2026-03-15 ou 15/03/2026)`);
+        continue;
+      }
 
       const accountId = resolveAccount(compte);
       if (!accountId) {
@@ -595,9 +626,11 @@ export class JournalService {
 
       rows.push({
         date, piece, compte, tiers, libelle,
-        debit:  parseFloat(debitStr)  || 0,
-        credit: parseFloat(creditStr) || 0,
-        journal_type: journal_type ?? 'od',
+        debit:  parseAmount(debitStr),
+        credit: parseAmount(creditStr),
+        // Type de journal insensible à la casse ; inconnu ou absent → OD
+        journal_type: ['achats', 'ventes', 'banque', 'caisse', 'od', 'salaires', 'actif']
+          .includes((journal_type ?? '').toLowerCase()) ? journal_type.toLowerCase() : 'od',
       });
     }
 
@@ -644,6 +677,12 @@ export class JournalService {
       }
 
       validGroups.push({ first, groupRows, totalDebit, totalCredit, entryDate });
+    }
+
+    // Plan Gratuit : l'import est refusé en entier s'il dépasse le quota du mois
+    // (pas d'import partiel, pour ne pas laisser un journal incomplet).
+    if (validGroups.length > 0) {
+      await this.limits.assertCanCreateEntries(companyId, validGroups.length);
     }
 
     // Créer toutes les écritures valides en UNE SEULE transaction (beaucoup plus rapide)

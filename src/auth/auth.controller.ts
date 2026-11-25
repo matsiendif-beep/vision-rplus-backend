@@ -1,13 +1,14 @@
 // ── auth/auth.controller.ts ───────────────────────────────────
 import {
-  Controller, Post, Get, Patch, Body,
+  Controller, Post, Get, Patch, Body, Req,
   UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { IsString, MinLength } from 'class-validator';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { Throttle }      from '@nestjs/throttler';
 import { AuthService }   from './auth.service';
-import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, AcceptTermsDto } from './dto/auth.dto';
 import { JwtAuthGuard }  from '../common/guards/jwt-auth.guard';
 import { GetUser }       from '../common/decorators';
 
@@ -24,8 +25,18 @@ export class AuthController {
   @Post('register')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })   // 10 inscriptions / min / IP
   @ApiOperation({ summary: 'Créer un compte Vision R+' })
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(@Body() dto: RegisterDto, @Req() req: Request) {
+    return this.authService.register(dto, { ip: req.ip, userAgent: req.headers['user-agent'] });
+  }
+
+  // Acceptation d'une nouvelle version des CGU/CGV par un utilisateur existant
+  @Post('accept-terms')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accepter la version en vigueur des conditions générales' })
+  acceptTerms(@GetUser('id') userId: string, @Body() dto: AcceptTermsDto, @Req() req: Request) {
+    return this.authService.acceptTerms(userId, dto.version, { ip: req.ip, userAgent: req.headers['user-agent'] });
   }
 
   @Post('login')

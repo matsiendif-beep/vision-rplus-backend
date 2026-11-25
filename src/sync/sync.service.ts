@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PlanLimitsService } from '../common/plan/plan-limits.service';
 
 export interface SyncPushDto {
   device_id: string;
@@ -16,7 +17,10 @@ export interface SyncPushDto {
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private limits: PlanLimitsService,
+  ) {}
 
   // ── Push depuis mobile ────────────────────────────────────
   async push(companyId: string, userId: string, dto: SyncPushDto) {
@@ -120,6 +124,9 @@ export class SyncService {
         where: { id: op.record_id },
       });
       if (exists) return;
+
+      // Plan Gratuit : 10 écritures par mois (l'opération passe en erreur sinon)
+      await this.limits.assertCanCreateEntries(companyId, 1);
 
       await this.prisma.journalEntry.create({
         data: {

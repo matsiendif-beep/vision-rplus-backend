@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { LegalController } from './legal.controller';
+import { LegalController, HealthController } from './legal.controller';
 
 @Module({
-  controllers: [LegalController],
+  controllers: [LegalController, HealthController],
 })
 export class LegalModule {}
