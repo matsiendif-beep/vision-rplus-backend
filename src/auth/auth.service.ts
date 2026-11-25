@@ -1,7 +1,14 @@
 import {
   Injectable, ConflictException,
   UnauthorizedException, BadRequestException, Logger,
+  HttpException, HttpStatus,
 } from '@nestjs/common';
+
+// Blocage temporaire d'un compte après trop d'échecs de connexion
+// (protège contre la recherche de mot de passe, même si l'attaquant change d'IP).
+const MAX_FAILED_LOGINS = 5;
+const FAILED_WINDOW_MS  = 15 * 60_000;
+const LOCK_DURATION_MS  = 15 * 60_000;
 import { JwtService }    from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2       from 'argon2';
@@ -12,6 +19,8 @@ import { OnboardingEmailsService } from '../email/onboarding-emails.service';
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  /** Échecs de connexion par email (en mémoire : remis à zéro à chaque redémarrage). */
+  private readonly failedLogins = new Map<string, { count: number; first: number; lockedUntil?: number }>();
 
   constructor(
     private prisma:  PrismaService,
@@ -61,18 +70,22 @@ export class AuthService {
 
   // ── Connexion ──────────────────────────────────────────────
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email.trim().toLowerCase() },
-    });
+    const email = dto.email.trim().toLowerCase();
+    this.assertNotLocked(email);
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
 
     if (!user || !user.is_active) {
+      this.recordFailedLogin(email);
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
 
     const passwordValid = await argon2.verify(user.password_hash, dto.password);
     if (!passwordValid) {
+      this.recordFailedLogin(email);
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
+    this.failedLogins.delete(email);
 
     // Mettre à jour la date de dernière connexion
     await this.prisma.user.update({
@@ -92,6 +105,39 @@ export class AuthService {
       },
       ...tokens,
     };
+  }
+
+  // ── Protection contre les essais de mots de passe ──────────
+  private assertNotLocked(email: string) {
+    const entry = this.failedLogins.get(email);
+    if (!entry?.lockedUntil) return;
+    const remaining = entry.lockedUntil - Date.now();
+    if (remaining <= 0) { this.failedLogins.delete(email); return; }
+    const minutes = Math.ceil(remaining / 60_000);
+    throw new HttpException(
+      `Trop de tentatives de connexion pour ce compte. Réessayez dans ${minutes} minute${minutes > 1 ? 's' : ''}.`,
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
+  }
+
+  private recordFailedLogin(email: string) {
+    const now = Date.now();
+    // Nettoyage pour que la table ne grossisse pas indéfiniment
+    if (this.failedLogins.size > 10_000) {
+      for (const [k, v] of this.failedLogins) {
+        if ((v.lockedUntil ?? v.first + FAILED_WINDOW_MS) < now) this.failedLogins.delete(k);
+      }
+    }
+    const entry = this.failedLogins.get(email);
+    if (!entry || now - entry.first > FAILED_WINDOW_MS) {
+      this.failedLogins.set(email, { count: 1, first: now });
+      return;
+    }
+    entry.count += 1;
+    if (entry.count >= MAX_FAILED_LOGINS) {
+      entry.lockedUntil = now + LOCK_DURATION_MS;
+      this.logger.warn(`Compte ${email} bloqué 15 min après ${entry.count} échecs de connexion`);
+    }
   }
 
   // ── Profil utilisateur connecté ────────────────────────────

@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { Request }         from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { SkipThrottle }    from '@nestjs/throttler';
 import { BillingService }  from './billing.service';
 import { CinetPayService } from './cinetpay.service';
 import { JwtAuthGuard }    from '../common/guards/jwt-auth.guard';
@@ -49,6 +50,7 @@ export class BillingController {
 
   // ── Webhook Stripe (pas de JWT ici — Stripe signe sa requête) ─
   @Post('webhook')
+  @SkipThrottle()   // signé par Stripe (constructEvent) — ne jamais bloquer
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook Stripe (usage interne)' })
   webhook(
@@ -79,6 +81,7 @@ export class BillingController {
   }
 
   @Post('cinetpay/notify')
+  @SkipThrottle()   // vérifié en interrogeant l'API CinetPay (checkPaymentStatus)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook CinetPay (usage interne)' })
   cinetpayNotify(@Body() body: any) {

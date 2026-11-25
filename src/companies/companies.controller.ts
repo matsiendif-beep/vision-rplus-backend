@@ -4,10 +4,12 @@ import {
   Body, Param, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle }          from '@nestjs/throttler';
 import { IsString, IsDateString, IsOptional } from 'class-validator';
 import { CompaniesService }  from './companies.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto/company.dto';
 import { JwtAuthGuard }      from '../common/guards/jwt-auth.guard';
+import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import { GetUser }           from '../common/decorators';
 
 class CreateFiscalYearDto {
@@ -18,7 +20,9 @@ class CreateFiscalYearDto {
 
 @ApiTags('Entreprises')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+// CompanyAccessGuard : toute route avec :companyId vérifie que l'utilisateur
+// est propriétaire ou membre de l'entreprise (stats et exercices étaient ouverts).
+@UseGuards(JwtAuthGuard, CompanyAccessGuard)
 @Controller('companies')
 export class CompaniesController {
   constructor(private readonly service: CompaniesService) {}
@@ -35,6 +39,7 @@ export class CompaniesController {
 
   // POST /companies/demo
   @Post('demo')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Créer (ou récupérer) l\'entreprise de démonstration' })
   createDemo(@GetUser('id') userId: string) {
     return this.service.createDemo(userId);

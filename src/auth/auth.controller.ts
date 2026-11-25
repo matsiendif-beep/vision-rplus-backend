@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { IsString, MinLength } from 'class-validator';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle }      from '@nestjs/throttler';
 import { AuthService }   from './auth.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { JwtAuthGuard }  from '../common/guards/jwt-auth.guard';
@@ -21,12 +22,14 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })   // 10 inscriptions / min / IP
   @ApiOperation({ summary: 'Créer un compte Vision R+' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
   @Post('login')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })   // 20 essais / min / IP (+ blocage par compte)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Connexion et récupération des tokens JWT' })
   login(@Body() dto: LoginDto) {
@@ -42,6 +45,7 @@ export class AuthController {
   }
 
   @Patch('change-password')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)

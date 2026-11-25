@@ -22,11 +22,13 @@
  */
 
 import {
-  Controller, Post, Get, Body, Query, Logger,
+  Controller, Post, Get, Body, Query, Logger, Req,
   HttpCode, HttpStatus, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { SocialService } from './social.service';
+import { assertMetaSignature, assertSharedSecret } from '../common/webhook-signature';
 
 @ApiTags('Social Media — Webhooks')
 @Controller('social')
@@ -37,11 +39,20 @@ export class SocialController {
 
   // ── ManyChat Webhook ──────────────────────────────────────────
   // Appelé par ManyChat quand un abonné envoie un message ou touche un bouton
+  //  Sécurité : ManyChat doit envoyer l'en-tête « X-Webhook-Secret » égal à
+  //  MANYCHAT_WEBHOOK_SECRET (sinon n'importe qui consommerait vos crédits IA).
   @Post('manychat-webhook')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook ManyChat — réponse IA aux messages entrants' })
-  async manyChatWebhook(@Body() body: { message?: string; firstName?: string; intent?: string }) {
-    const { message = '', firstName = 'ami(e)', intent } = body;
+  async manyChatWebhook(
+    @Req() req: any,
+    @Body() body: { message?: string; firstName?: string; intent?: string },
+  ) {
+    assertSharedSecret(req, 'MANYCHAT_WEBHOOK_SECRET', 'ManyChat');
+    const { firstName = 'ami(e)', intent } = body;
+    // Limite la taille du message transmis à l'IA (coût et abus)
+    const message = String(body.message ?? '').slice(0, 2000);
     this.logger.log(`ManyChat webhook — "${firstName}": "${message}" | intent: ${intent ?? 'none'}`);
 
     if (!message && !intent) throw new BadRequestException('message ou intent requis');
@@ -70,9 +81,11 @@ export class SocialController {
   // ── Meta Webhook — Messages entrants (POST) ──────────────────
   // Reçoit les DMs Instagram ou Messenger et répond automatiquement
   @Post('meta-webhook')
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Meta Webhook — réception et traitement des DMs entrants' })
-  async handleMetaWebhook(@Body() body: any) {
+  async handleMetaWebhook(@Req() req: any, @Body() body: any) {
+    assertMetaSignature(req, 'Meta Messenger/Instagram');
     // Meta attend toujours un 200 immédiat, même si le traitement prend du temps
     // On log et on traite en async (fire-and-forget pour respecter le délai Meta)
     this.service.processMetaEvent(body).catch((err) =>

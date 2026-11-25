@@ -1,5 +1,7 @@
 import { Module }       from '@nestjs/common';
 import { ConfigModule }  from '@nestjs/config';
+import { APP_GUARD }     from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule }  from './prisma/prisma.module';
 import { AuthModule }    from './auth/auth.module';
 import { CompaniesModule }   from './companies/companies.module';
@@ -21,6 +23,13 @@ import { EmailModule }       from './email/email.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Limite de requêtes par adresse IP. Volontairement large par défaut :
+    // en Afrique, beaucoup d'utilisateurs mobiles partagent la même IP (CGNAT).
+    // Les routes sensibles (connexion, IA…) ont des limites plus strictes.
+    ThrottlerModule.forRoot({
+      throttlers:   [{ name: 'default', ttl: 60_000, limit: 300 }],
+      errorMessage: 'Trop de requêtes en peu de temps. Patientez une minute puis réessayez.',
+    }),
     PrismaModule,
     EmailModule,         // Emails transactionnels + séquence d'onboarding (Brevo)
     SeedModule,
@@ -42,6 +51,9 @@ import { EmailModule }       from './email/email.module';
     LegalModule,         // Pages légales (politique de confidentialité)
     BillingModule,       // Abonnements & paiements Stripe
     WhatsAppModule,      // Notifications + assistant IA WhatsApp
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
