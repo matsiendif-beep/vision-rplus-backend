@@ -9,17 +9,54 @@ const assertCanEdit = (req: any) => {
   if (req.userRole === 'lecture') throw new ForbiddenException('Accès en lecture seule : vous ne pouvez pas modifier le plan comptable.');
 };
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { IsUUID, IsOptional, IsBoolean } from 'class-validator';
 import { AccountsService }  from './accounts.service';
+import { ReclassificationService } from './reclassification.service';
 import { CreateAccountDto, UpdateAccountDto, FilterAccountsDto } from './dto/account.dto';
 import { JwtAuthGuard }      from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
+import { GetUser }           from '../common/decorators';
+
+class ReclassifyDto {
+  @IsUUID('all', { message: 'Compte cible invalide' })
+  target_account_id: string;
+
+  @IsOptional()
+  @IsBoolean()
+  dry_run?: boolean;
+}
 
 @ApiTags('Comptes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, CompanyAccessGuard)
 @Controller('companies/:companyId/accounts')
 export class AccountsController {
-  constructor(private readonly service: AccountsService) {}
+  constructor(
+    private readonly service: AccountsService,
+    private readonly reclass: ReclassificationService,
+  ) {}
+
+  // GET /companies/:companyId/accounts/legacy-usage
+  // (déclarée avant « :accountId » pour ne pas être confondue avec un identifiant)
+  @Get('legacy-usage')
+  @ApiOperation({ summary: 'Comptes à ancien libellé portant des écritures dans cette entreprise' })
+  legacyUsage(@Param('companyId') companyId: string) {
+    return this.reclass.legacyUsage(companyId);
+  }
+
+  // POST /companies/:companyId/accounts/:accountId/reclassify
+  @Post(':accountId/reclassify')
+  @ApiOperation({ summary: 'Reclasser le solde d\'un compte vers un autre (écriture d\'OD), ou aperçu si dry_run' })
+  reclassify(
+    @Param('companyId') companyId: string,
+    @Param('accountId') accountId: string,
+    @GetUser('id') userId: string,
+    @Body() dto: ReclassifyDto,
+    @Req() req: any,
+  ) {
+    if (!dto.dry_run) assertCanEdit(req);
+    return this.reclass.reclassify(companyId, userId, accountId, dto.target_account_id, !!dto.dry_run);
+  }
 
   // GET /companies/:companyId/accounts
   @Get()
