@@ -47,7 +47,7 @@ export class AnalyticsService {
     const clientsNet = this.sumByPrefix(balances, '411');
     const foursNet   = this.sumByPrefix(balances, '401');
 
-    const kpis = this.computeKpis(balances, totalProduits, totalCharges);
+    const kpis = this.computeKpis(balances, totalProduits, totalCharges, company.accounting_system as PlanSystem);
 
     const alertes = await this.generateAlerts(companyId, {
       tresorerie, resultatNet, totalCharges, totalProduits,
@@ -89,7 +89,7 @@ export class AnalyticsService {
   async getKpis(companyId: string, fiscalYearId: string) {
     const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
     const { produits, charges } = this.resultParts(balances, sys);
-    return this.computeKpis(balances, produits, charges);
+    return this.computeKpis(balances, produits, charges, sys);
   }
 
   // ── Balance générale ─────────────────────────────────────
@@ -236,15 +236,27 @@ export class AnalyticsService {
     balances: any[],
     totalProduits: number,
     totalCharges: number,
+    sys: PlanSystem,
   ) {
     const resultatNet = totalProduits - totalCharges;
-    const dotations   = this.sumByPrefix(balances, '68');
-    const caf         = resultatNet + dotations;
+    // CAF (méthode additive simplifiée) = résultat + dotations − reprises.
+    //  SYSCOHADA : dotations 68 et 69, reprises 79 ; PCG : dotations 68, reprises 78
+    //  (en PCG, 69 = participation et impôt sur les bénéfices : non repris).
+    const ohada = sys === 'ohada';
+    const dotations = this.sumByPrefix(balances, '68') + (ohada ? this.sumByPrefix(balances, '69') : 0);
+    const reprises  = -this.sumByPrefix(balances, ohada ? '79' : '78');
+    const caf         = resultatNet + dotations - reprises;
     const tresorerie  = this.sumByPrefix(balances, '5');
-    const dettes      = this.sumByPrefix(balances, '16') + this.sumByPrefix(balances, '17');
-    const actif       = this.sumByPrefix(balances, '1') + this.sumByPrefix(balances, '2') + this.sumByPrefix(balances, '3') + this.sumByPrefix(balances, '4') + this.sumByPrefix(balances, '5');
-    const chargesVariables = totalCharges * 0.6; // estimation
-    const seuilRentabilite = totalCharges > 0 ? (chargesVariables / (1 - chargesVariables / Math.max(totalProduits, 1))) : 0;
+    // Endettement = dettes totales / total de l'actif, avec les mêmes totaux que le bilan
+    const bilan  = this.bilanFrom(balances, sys);
+    const actif  = bilan.totalActif;
+    const dettes = bilan.empruntsLT + bilan.fournisseurs + bilan.autresDettes + bilan.tresoreriePassif;
+    // Seuil de rentabilité = charges fixes / taux de marge sur coûts variables
+    //  (répartition estimée : 60 % de charges variables, 40 % de charges fixes)
+    const chargesVariables = totalCharges * 0.6;
+    const chargesFixes     = totalCharges - chargesVariables;
+    const tauxMarge        = totalProduits > 0 ? 1 - chargesVariables / totalProduits : 0;
+    const seuilRentabilite = tauxMarge > 0 ? chargesFixes / tauxMarge : 0;
 
     return {
       caf:                   Math.round(caf * 100) / 100,
@@ -337,6 +349,55 @@ export class AnalyticsService {
   //  dès lors que les écritures sont équilibrées.
   async getBilan(companyId: string, fiscalYearId: string) {
     const [balances, sys] = await Promise.all([this.getBalances(companyId, fiscalYearId), this.systemOf(companyId)]);
+    const {
+      immoIncorp, immoCorp, immoFin, stocks, creancesClients, autresCreances, tresorerieActif,
+      capital, reserves, resultatNet, empruntsLT, fournisseurs, autresDettes, tresoreriePassif,
+      totalActif, totalPassif,
+    } = this.bilanFrom(balances, sys);
+
+    return {
+      actif: {
+        immobilisations: {
+          incorporelles: immoIncorp,
+          corporelles:   immoCorp,
+          financieres:   immoFin,
+          total:         immoIncorp + immoCorp + immoFin,
+        },
+        actif_circulant: {
+          stocks,
+          creances_clients:  creancesClients,
+          autres_creances:   autresCreances,
+          total:             stocks + creancesClients + autresCreances,
+        },
+        tresorerie_actif: tresorerieActif,
+        total_actif:      totalActif,
+      },
+      passif: {
+        capitaux_propres: {
+          capital,
+          reserves,
+          resultat_net:  resultatNet,
+          total:         capital + reserves + resultatNet,
+        },
+        dettes_financieres: {
+          emprunts_lt:  empruntsLT,
+          total:        empruntsLT,
+        },
+        passif_circulant: {
+          fournisseurs,
+          autres_dettes: autresDettes,
+          total:         fournisseurs + autresDettes,
+        },
+        tresorerie_passif: tresoreriePassif,
+        total_passif:      totalPassif,
+      },
+      equilibre: Math.abs(totalActif - totalPassif) < 1,
+      system:    sys,
+    };
+  }
+
+  /** Rubriques du bilan à partir des soldes (utilisé par le bilan et par les indicateurs). */
+  private bilanFrom(balances: any[], sys: PlanSystem) {
     const ohada = sys === 'ohada';
 
     // Rubriques d'immobilisations (les amortissements 28X et dépréciations 29X
@@ -386,43 +447,9 @@ export class AnalyticsService {
     const totalPassif = capital + reserves + resultatNet + empruntsLT + fournisseurs + autresDettes + tresoreriePassif;
 
     return {
-      actif: {
-        immobilisations: {
-          incorporelles: immoIncorp,
-          corporelles:   immoCorp,
-          financieres:   immoFin,
-          total:         immoIncorp + immoCorp + immoFin,
-        },
-        actif_circulant: {
-          stocks,
-          creances_clients:  creancesClients,
-          autres_creances:   autresCreances,
-          total:             stocks + creancesClients + autresCreances,
-        },
-        tresorerie_actif: tresorerieActif,
-        total_actif:      totalActif,
-      },
-      passif: {
-        capitaux_propres: {
-          capital,
-          reserves,
-          resultat_net:  resultatNet,
-          total:         capital + reserves + resultatNet,
-        },
-        dettes_financieres: {
-          emprunts_lt:  empruntsLT,
-          total:        empruntsLT,
-        },
-        passif_circulant: {
-          fournisseurs,
-          autres_dettes: autresDettes,
-          total:         fournisseurs + autresDettes,
-        },
-        tresorerie_passif: tresoreriePassif,
-        total_passif:      totalPassif,
-      },
-      equilibre: Math.abs(totalActif - totalPassif) < 1,
-      system:    sys,
+      immoIncorp, immoCorp, immoFin, stocks, creancesClients, autresCreances, tresorerieActif,
+      capital, reserves, resultatNet, empruntsLT, fournisseurs, autresDettes, tresoreriePassif,
+      totalActif, totalPassif,
     };
   }
 
