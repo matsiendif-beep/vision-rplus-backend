@@ -129,6 +129,23 @@ Sans renouvellement, votre compte repassera à la formule Gratuit : vos données
   };
 }
 
+// Fermeture de compte — confirmation (données conservées 90 jours)
+export function accountClosed(ctx: TemplateContext, deletionOn: Date): RenderedEmail {
+  const date = deletionOn.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+  return {
+    subject: 'Votre compte Vision R+ a été fermé',
+    html: layout(ctx, `
+<p>${hello(ctx)}</p>
+<p>Votre compte Vision R+ a bien été fermé et tout abonnement en cours a été arrêté : aucun prélèvement ne sera effectué.</p>
+<p>Conformément à nos conditions générales, vos données comptables sont conservées jusqu'au <b>${date}</b>.
+D'ici là, vous pouvez nous demander de <b>réactiver</b> votre compte ou de vous <b>transmettre vos données</b> en répondant simplement à cet email.
+Passé cette date, elles seront définitivement supprimées.</p>
+<p>Rappel : vous restez tenu de conserver vos pièces et documents comptables pendant la durée légale (10 ans).</p>
+<p>Merci d'avoir utilisé Vision R+. Si quelque chose vous a manqué, votre avis nous aidera beaucoup : il suffit de répondre à cet email.</p>`),
+    text: `${hello(ctx)}\n\nVotre compte Vision R+ a été fermé et tout abonnement arrêté. Vos données sont conservées jusqu'au ${date} : répondez à cet email pour réactiver le compte ou recevoir vos données. Ensuite, elles seront supprimées.${footerText(ctx)}`,
+  };
+}
+
 // Après souscription — merci + recommandation
 export function subscribed(ctx: TemplateContext, plan: string): RenderedEmail {
   const url = `${ctx.appUrl}/dashboard`;

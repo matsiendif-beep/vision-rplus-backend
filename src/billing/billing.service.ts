@@ -182,6 +182,23 @@ export class BillingService {
     return created.id;
   }
 
+  // ── Fermeture de compte : arrêt immédiat de tout abonnement ───
+  //  (aucun prélèvement futur ; pas de remboursement de la période en cours, CGV art. 7)
+  async cancelAllForUser(userId: string) {
+    const subs = await this.prisma.subscription.findMany({
+      where: { user_id: userId, status: { in: ['essai', 'actif', 'expire'] } },
+    });
+    for (const s of subs) {
+      if (s.stripe_sub_id && this.stripe) {
+        try { await this.stripe.subscriptions.cancel(s.stripe_sub_id); }
+        catch (e: any) { this.logger.error(`Annulation Stripe ${s.stripe_sub_id} : ${e.message}`); }
+      }
+      await this.prisma.subscription.update({ where: { id: s.id }, data: { status: 'annule', cancelled_at: new Date() } });
+    }
+    await this.prisma.user.update({ where: { id: userId }, data: { plan: 'free' } });
+    return subs.length;
+  }
+
   // ── Statut affiché sur la page Abonnement ─────────────────────
   async getSubscription(userId: string) {
     const [user, subs] = await Promise.all([

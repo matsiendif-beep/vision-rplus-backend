@@ -40,6 +40,12 @@ export class AuthService {
       where: { email: dto.email.trim().toLowerCase() },
     });
     if (exists) {
+      if (!exists.is_active) {
+        // Compte fermé par son titulaire : réactivation possible pendant 90 jours
+        throw new ConflictException(
+          'Un compte fermé existe avec cet email. Pour le réactiver ou récupérer vos données, écrivez à contact@visionrplus.com.',
+        );
+      }
       throw new ConflictException('Un compte existe déjà avec cet email');
     }
 

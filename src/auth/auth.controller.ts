@@ -8,6 +8,7 @@ import { IsString, MinLength } from 'class-validator';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { Throttle }      from '@nestjs/throttler';
 import { AuthService }   from './auth.service';
+import { AccountClosureService } from './account-closure.service';
 import { RegisterDto, LoginDto, AcceptTermsDto } from './dto/auth.dto';
 import { JwtAuthGuard }  from '../common/guards/jwt-auth.guard';
 import { GetUser }       from '../common/decorators';
@@ -17,10 +18,29 @@ class ChangePasswordDto {
   @IsString() @MinLength(8) new_password: string;
 }
 
+class CloseAccountDto {
+  @IsString() password: string;
+  @IsString() confirmation: string;   // doit valoir « SUPPRIMER »
+}
+
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private closure: AccountClosureService,
+  ) {}
+
+  // Fermeture du compte par son titulaire (données conservées 90 jours puis supprimées)
+  @Post('close-account')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Fermer mon compte (suppression définitive après 90 jours)' })
+  closeAccount(@GetUser('id') userId: string, @Body() dto: CloseAccountDto, @Req() req: Request) {
+    return this.closure.close(userId, dto.password, dto.confirmation, { ip: req.ip });
+  }
 
   @Post('register')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })   // 10 inscriptions / min / IP

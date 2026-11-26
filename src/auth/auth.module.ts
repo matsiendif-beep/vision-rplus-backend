@@ -5,9 +5,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService }     from './auth.service';
 import { AuthController }  from './auth.controller';
 import { JwtStrategy }     from './jwt.strategy';
+import { AccountClosureService } from './account-closure.service';
+import { BillingModule }   from '../billing/billing.module';
 
 @Module({
   imports: [
+    BillingModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports:    [ConfigModule],
@@ -19,7 +22,7 @@ import { JwtStrategy }     from './jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers:   [AuthService, JwtStrategy],
+  providers:   [AuthService, JwtStrategy, AccountClosureService],
   exports:     [JwtStrategy, PassportModule],
 })
 export class AuthModule {}

@@ -16,9 +16,9 @@ import { EmailService }  from './email.service';
 import { DEMO_MARKER }   from '../companies/demo-company';
 import * as T from './templates';
 
-type EmailKey = 'welcome' | 'activation' | 'help' | 'trial_ending' | 'subscribed' | 'momo_ending';
+type EmailKey = 'welcome' | 'activation' | 'help' | 'trial_ending' | 'subscribed' | 'momo_ending' | 'account_closed';
 // Emails liés au compte ou à l'abonnement : envoyés même après désinscription des conseils
-const TRANSACTIONAL: EmailKey[] = ['subscribed', 'momo_ending', 'trial_ending'];
+const TRANSACTIONAL: EmailKey[] = ['subscribed', 'momo_ending', 'trial_ending', 'account_closed'];
 
 const HOUR = 3_600_000;
 const DAY  = 24 * HOUR;
@@ -109,6 +109,11 @@ export class OnboardingEmailsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Rappel Mobile Money J-3 (une fois par période : recordId = abonnement + échéance). */
+  /** Confirmation de fermeture de compte (une fois par fermeture). */
+  async sendAccountClosed(user: Recipient, deletionOn: Date, closureId: string) {
+    await this.sendOnce(user, 'account_closed', (ctx) => T.accountClosed(ctx, deletionOn), closureId);
+  }
+
   async sendMobileMoneyEnding(userId: string, plan: string, endsAt: Date, subscriptionId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId }, select: { id: true, email: true, first_name: true },
